@@ -1,0 +1,48 @@
+{
+  "name": "scss-alias-jump",
+  "displayName": "SCSS Alias Jump",
+  "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases.",
+  "version": "0.0.1",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:scss",
+    "onLanguage:sass",
+    "onLanguage:css"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "SCSS Alias Jump",
+      "properties": {
+        "scssAliasJump.aliases": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Map import aliases to absolute paths (can use VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}`). Example: `{ \"@\": \"${workspaceFolder:nlrc}/src\", \"@scss\": \"${workspaceFolder:_assets}/scss\" }`",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@vscode/vsce": "^3.7.1"
+  }
+}
