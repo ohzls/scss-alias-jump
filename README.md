@@ -46,14 +46,13 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### History
 
-- **0.0.2**
-  - Added `@extend %...` Cmd/Ctrl+Click jump (direct definition + nested `&` chain support)
-  - Added link-style behavior for `@extend` via `DocumentLinkProvider` (hover underline / pointer + click)
-  - Added OutputChannel logs (`SCSS Alias Jump`) for easier debugging
-
-### History
-
 - **0.0.3**
   - Added `@extend %...` Cmd/Ctrl+Click jump (direct definition + nested `&` chain support)
   - Added link-style behavior for `@extend` via `DocumentLinkProvider` (hover underline / pointer + click)
   - Added OutputChannel logs (`SCSS Alias Jump`) for easier debugging
+
+- **0.0.4**
+  - Added fallback jump for loop/interpolated placeholders (e.g. `%inner-padding-max` → `%inner-padding` or `%inner-padding-#{$k}...`)
+  - Added duplicate-definition handling:
+    - Definition provider returns multiple locations so VS Code can show **Peek Definitions**
+    - `@extend` link click shows QuickPick when multiple matches exist

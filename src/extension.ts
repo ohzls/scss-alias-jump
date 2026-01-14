@@ -125,6 +125,47 @@ function braceDelta(line: string) {
   return countChar(s, "{") - countChar(s, "}");
 }
 
+function tokenBoundaryOk(line: string, idx: number, tokenLen: number) {
+  const before = idx === 0 ? "" : line[idx - 1];
+  if (before && /[A-Za-z0-9_-]/.test(before)) return false;
+
+  const after = line[idx + tokenLen] ?? "";
+  if (after && /[A-Za-z0-9_-]/.test(after)) return false;
+
+  return true;
+}
+
+function hasBraceSoon(lines: string[], fromLine: number, tokenEndCh: number) {
+  const line = lines[fromLine] ?? "";
+  const rest = line.slice(tokenEndCh);
+  if (rest.includes("{")) return true;
+
+  for (let j = fromLine + 1; j < Math.min(fromLine + 6, lines.length); j++) {
+    const n = (lines[j] ?? "").trim();
+    if (n.length === 0) continue;
+    return n.includes("{");
+  }
+
+  return false;
+}
+
+function findDirectPlaceholderDefinitionOnLine(
+  lines: string[],
+  lineNo: number,
+  token: string
+): { line: number; ch: number } | null {
+  const line = lines[lineNo] ?? "";
+  if (!line.includes(token)) return null;
+  if (line.includes("@extend")) return null;
+
+  const idx = line.indexOf(token);
+  if (idx < 0) return null;
+  if (!tokenBoundaryOk(line, idx, token.length)) return null;
+  if (!hasBraceSoon(lines, lineNo, idx + token.length)) return null;
+
+  return { line: lineNo, ch: idx };
+}
+
 function findOpeningBraceLine(
   lines: string[],
   fromLine: number,
@@ -264,59 +305,62 @@ function getWorkspaceFoldersInSearchOrder(
   return [primary, ...folders.filter((f) => f.uri.toString() !== primary.uri.toString())];
 }
 
-async function findPlaceholderDefinition(
+async function findPlaceholderDefinitions(
   placeholderName: string,
   forUri: vscode.Uri
-): Promise<vscode.Location | null> {
+): Promise<vscode.Location[]> {
   const folders = getWorkspaceFoldersInSearchOrder(forUri);
   const token = `%${placeholderName}`;
+  const hitKey = (loc: vscode.Location) =>
+    `${loc.uri.toString()}::${loc.range.start.line}:${loc.range.start.character}`;
+  const hits: vscode.Location[] = [];
+  const seen = new Set<string>();
+
+  const filesCache = new Map<string, readonly vscode.Uri[]>();
+  const textCache = new Map<string, string | null>();
+
+  const listFiles = async (folder: vscode.WorkspaceFolder) => {
+    const key = folder.uri.toString();
+    const cached = filesCache.get(key);
+    if (cached) return cached;
+    const pattern = new vscode.RelativePattern(folder, "**/*.{scss,sass}");
+    const files = await vscode.workspace.findFiles(
+      pattern,
+      "**/{node_modules,dist,build}/**"
+    );
+    filesCache.set(key, files);
+    return files;
+  };
+
+  const getText = async (file: vscode.Uri) => {
+    const key = file.toString();
+    if (textCache.has(key)) return textCache.get(key) ?? null;
+    const t = await readTextFile(file);
+    textCache.set(key, t);
+    return t;
+  };
+
+  const pushHit = (loc: vscode.Location) => {
+    const k = hitKey(loc);
+    if (seen.has(k)) return;
+    seen.add(k);
+    hits.push(loc);
+  };
 
   // Heuristic: placeholder definition appears in selector context, not in @extend lines.
   // We'll accept lines that contain the token and are followed by "{" (same line or next non-empty line).
   for (const folder of folders) {
-    const pattern = new vscode.RelativePattern(folder, "**/*.{scss,sass}");
-    const files = await vscode.workspace.findFiles(pattern, "**/{node_modules,dist,build}/**");
+    const files = await listFiles(folder);
 
     for (const file of files) {
-      const text = await readTextFile(file);
+      const text = await getText(file);
       if (!text || !text.includes(token)) continue;
 
       const lines = text.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line.includes(token)) continue;
-        if (line.includes("@extend")) continue;
-
-        // Try to ensure we're in selector definition context
-        const idx = line.indexOf(token);
-        if (idx < 0) continue;
-
-        // Basic boundary checks
-        const before = idx === 0 ? "" : line[idx - 1];
-        if (before && /[A-Za-z0-9_-]/.test(before)) continue;
-
-        const after = line[idx + token.length] ?? "";
-        if (after && /[A-Za-z0-9_-]/.test(after)) continue;
-
-        const rest = line.slice(idx + token.length);
-        const hasBraceSameLine = rest.includes("{");
-
-        let hasBraceSoon = hasBraceSameLine;
-        if (!hasBraceSoon) {
-          // look ahead to next non-empty line
-          for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
-            const n = lines[j].trim();
-            if (n.length === 0) continue;
-            hasBraceSoon = n.includes("{");
-            break;
-          }
-        }
-
-        if (!hasBraceSoon) continue;
-
-        const uri = file;
-        out?.appendLine(`[hit] @extend %${placeholderName} -> ${uri.fsPath}:${i + 1}`);
-        return new vscode.Location(uri, new vscode.Position(i, idx));
+        const direct = findDirectPlaceholderDefinitionOnLine(lines, i, token);
+        if (!direct) continue;
+        pushHit(new vscode.Location(file, new vscode.Position(direct.line, direct.ch)));
       }
     }
   }
@@ -327,11 +371,10 @@ async function findPlaceholderDefinition(
   const prefixes = buildPrefixCandidates(split.root, split.parts);
 
   for (const folder of folders) {
-    const pattern = new vscode.RelativePattern(folder, "**/*.{scss,sass}");
-    const files = await vscode.workspace.findFiles(pattern, "**/{node_modules,dist,build}/**");
+    const files = await listFiles(folder);
 
     for (const file of files) {
-      const text = await readTextFile(file);
+      const text = await getText(file);
       if (!text) continue;
 
       // Quick filter: file must contain at least one prefix token.
@@ -348,8 +391,7 @@ async function findPlaceholderDefinition(
 
           const idx = line.indexOf(baseToken);
           if (idx < 0) continue;
-          const before = idx === 0 ? "" : line[idx - 1];
-          if (before && /[A-Za-z0-9_-]/.test(before)) continue;
+          if (!tokenBoundaryOk(line, idx, baseToken.length)) continue;
 
           const braceLine = findOpeningBraceLine(lines, i);
           if (braceLine == null) continue;
@@ -358,18 +400,76 @@ async function findPlaceholderDefinition(
           const remaining = split.parts.slice(pref.usedParts);
           const found = findNestedChainInBlock(lines, braceLine, endLine, remaining);
           if (found) {
-            out?.appendLine(
-              `[hit] @extend %${placeholderName} -> %${pref.prefix} + &chain @ ${file.fsPath}:${found.line + 1}`
-            );
-            return new vscode.Location(file, new vscode.Position(found.line, found.ch));
+            pushHit(new vscode.Location(file, new vscode.Position(found.line, found.ch)));
           }
         }
       }
     }
   }
 
-  out?.appendLine(`[miss] @extend %${placeholderName} (placeholder definition not found)`);
-  return null;
+  // 3) Fallback: if exact/nested didn't resolve (common for interpolation like &-#{$k}),
+  // jump to the nearest "family" placeholder definition, e.g. %inner-padding-max -> %inner-padding
+  if (hits.length === 0) {
+    const shorterPrefixes = prefixes
+      .filter((p) => p.usedParts < split.parts.length)
+      .sort((a, b) => b.usedParts - a.usedParts);
+
+    for (const pref of shorterPrefixes) {
+      const baseToken = `%${pref.prefix}`;
+      for (const folder of folders) {
+        const files = await listFiles(folder);
+        for (const file of files) {
+          const text = await getText(file);
+          if (!text || !text.includes(baseToken)) continue;
+          const lines = text.split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            const direct = findDirectPlaceholderDefinitionOnLine(lines, i, baseToken);
+            if (!direct) continue;
+            out?.appendLine(
+              `[fallback] @extend %${placeholderName} -> %${pref.prefix} @ ${file.fsPath}:${direct.line + 1}`
+            );
+            return [new vscode.Location(file, new vscode.Position(direct.line, direct.ch))];
+          }
+        }
+      }
+    }
+
+    // 4) Fallback: placeholder defined with interpolation, e.g. %inner-padding-#{$k} { ... }
+    for (const pref of shorterPrefixes) {
+      const re = new RegExp(`%${escapeRegExp(pref.prefix)}(?:__|--|_|-)?#\\{`, "g");
+      for (const folder of folders) {
+        const files = await listFiles(folder);
+        for (const file of files) {
+          const text = await getText(file);
+          if (!text || !re.test(text)) continue;
+          const lines = text.split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i] ?? "";
+            const m = line.match(re);
+            if (!m) continue;
+            const idx = line.search(re);
+            if (idx < 0) continue;
+            if (line.includes("@extend")) continue;
+            // Try to ensure it's a selector-like definition
+            if (!hasBraceSoon(lines, i, idx + 2)) continue;
+            out?.appendLine(
+              `[fallback] @extend %${placeholderName} -> %${pref.prefix}{interpolation} @ ${file.fsPath}:${i + 1}`
+            );
+            return [new vscode.Location(file, new vscode.Position(i, idx))];
+          }
+        }
+      }
+    }
+  }
+
+  if (hits.length === 0) {
+    out?.appendLine(`[miss] @extend %${placeholderName} (placeholder definition not found)`);
+    return [];
+  }
+
+  // When multiple definitions exist, return all so VS Code can show a choice (Peek Definitions).
+  out?.appendLine(`[hit] @extend %${placeholderName} -> ${hits.length}개 정의 후보`);
+  return hits;
 }
 
 function resolveAliasToAbsolute(
@@ -430,8 +530,9 @@ class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
       const endIdx = startIdx + token.length;
 
       if (position.character >= startIdx && position.character <= endIdx) {
-        const loc = await findPlaceholderDefinition(placeholder, document.uri);
-        return loc;
+        const locs = await findPlaceholderDefinitions(placeholder, document.uri);
+        if (locs.length === 0) return null;
+        return locs.length === 1 ? locs[0] : locs;
       }
     }
 
@@ -581,16 +682,32 @@ export function activate(context: vscode.ExtensionContext) {
           const fromUri = vscode.Uri.parse(fromUriString);
           out?.appendLine(`[cmd] openExtendPlaceholder: %${placeholder} (from ${fromUri.fsPath})`);
 
-          const loc = await findPlaceholderDefinition(placeholder, fromUri);
-          if (!loc) {
+          const locs = await findPlaceholderDefinitions(placeholder, fromUri);
+          if (locs.length === 0) {
             vscode.window.showInformationMessage(
               `SCSS Alias Jump: %${placeholder} 정의를 찾지 못했어요. (Output: SCSS Alias Jump 확인)`
             );
             return;
           }
 
-          await vscode.window.showTextDocument(loc.uri, {
-            selection: loc.range,
+          const chosen =
+            locs.length === 1
+              ? locs[0]
+              : await (async () => {
+                  const items = locs.map((l) => ({
+                    label: `${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}`,
+                    description: l.uri.fsPath,
+                    loc: l,
+                  }));
+                  const picked = await vscode.window.showQuickPick(items, {
+                    placeHolder: `%${placeholder} 정의가 여러 개예요. 이동할 위치를 선택하세요.`,
+                    matchOnDescription: true,
+                  });
+                  return picked?.loc ?? locs[0];
+                })();
+
+          await vscode.window.showTextDocument(chosen.uri, {
+            selection: chosen.range,
             preview: true,
             preserveFocus: false,
           });
