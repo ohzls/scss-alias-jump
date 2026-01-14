@@ -155,6 +155,11 @@ function getPlaceholderNameUnderCursor(
   document: vscode.TextDocument,
   position: vscode.Position
 ): string | null {
+  // Ignore tokens inside line comments.
+  const lineText = document.lineAt(position.line).text;
+  const commentIdx = lineText.indexOf("//");
+  if (commentIdx >= 0 && position.character >= commentIdx) return null;
+
   const pctRange = document.getWordRangeAtPosition(position, /%[A-Za-z0-9_-]+/);
   if (pctRange) {
     const t = document.getText(pctRange);
@@ -167,6 +172,11 @@ function getAmpSegmentUnderCursor(
   document: vscode.TextDocument,
   position: vscode.Position
 ): string | null {
+  // Ignore tokens inside line comments.
+  const lineText = document.lineAt(position.line).text;
+  const commentIdx = lineText.indexOf("//");
+  if (commentIdx >= 0 && position.character >= commentIdx) return null;
+
   const r = document.getWordRangeAtPosition(position, /&[A-Za-z0-9_-]+/);
   if (!r) return null;
   const t = document.getText(r);
@@ -251,49 +261,174 @@ function inferNestedPlaceholderNameAtLine(
   return `${base.name}${suffix}`;
 }
 
-type ExtendRefsCacheEntry = { ts: number; locs: vscode.Location[] };
-const extendRefsCache = new Map<string, ExtendRefsCacheEntry>();
+function inferPlaceholderNameFromOpenStack(
+  lines: string[],
+  lineNo: number
+): string | null {
+  // Build a stack of currently-open selector blocks up to `lineNo`,
+  // then compose placeholder name as:
+  //   %<base> + (& segments after base, without '&', concatenated)
+  let depth = 0;
+  const stack: Array<{ text: string; depth: number; line: number }> = [];
+
+  for (let i = 0; i <= lineNo; i++) {
+    const lineRaw = lines[i] ?? "";
+    const cut = firstNonCommentIdx(lineRaw);
+    const line = lineRaw.slice(0, cut);
+    const depthBefore = depth;
+
+    const braceIdx = line.indexOf("{");
+    if (braceIdx >= 0) {
+      const sel = line.slice(0, braceIdx).trim();
+      if (sel.length > 0) {
+        stack.push({ text: sel, depth: depthBefore + 1, line: i });
+      }
+    }
+
+    depth += braceDelta(lineRaw);
+    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
+  }
+
+  // Find the innermost placeholder base in the open stack.
+  let baseIdx = -1;
+  let baseName: string | null = null;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const t = stack[i]?.text ?? "";
+    const m = /%([A-Za-z0-9_-]+)/.exec(t);
+    if (m) {
+      baseIdx = i;
+      baseName = m[1];
+      break;
+    }
+  }
+  if (!baseName) return null;
+
+  const ampRe = /&[A-Za-z0-9_-]+/;
+  const suffixParts: string[] = [];
+  for (let i = baseIdx + 1; i < stack.length; i++) {
+    const t = stack[i]?.text ?? "";
+    const m = ampRe.exec(t);
+    if (m) suffixParts.push(m[0].slice(1));
+  }
+
+  return `${baseName}${suffixParts.join("")}`;
+}
+
+type ExtendRef = {
+  uri: vscode.Uri;
+  pos: vscode.Position;
+  containerText: string | null;
+  containerLine: number | null;
+};
+
+type ExtendRefsCacheEntry2 = { ts: number; refs: ExtendRef[] };
+const extendRefsCache2 = new Map<string, ExtendRefsCacheEntry2>();
+
+function firstNonCommentIdx(line: string) {
+  const idx = line.indexOf("//");
+  return idx >= 0 ? idx : line.length;
+}
+
+function pickContainer(stack: Array<{ text: string; depth: number; line: number }>) {
+  // Prefer the innermost non at-rule selector; fallback to the innermost item.
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const t = stack[i]?.text?.trim() ?? "";
+    if (t.length === 0) continue;
+    if (!t.startsWith("@")) return stack[i];
+  }
+  return stack.length > 0 ? stack[stack.length - 1] : null;
+}
+
+function scanExtendRefsInText(
+  uri: vscode.Uri,
+  text: string,
+  placeholderName: string
+): ExtendRef[] {
+  const refs: ExtendRef[] = [];
+  // NOTE: We do NOT use `\\b` here because '-' is not a "word" character, so
+  // `%chat__sources` would incorrectly match `%chat__sources--overlay`.
+  // We want an identifier boundary where next char is NOT [A-Za-z0-9_-].
+  const re = new RegExp(
+    `@extend\\s+%${escapeRegExp(placeholderName)}(?![A-Za-z0-9_-])`,
+    "g"
+  );
+  const token = `%${placeholderName}`;
+
+  // Track nested blocks to infer "which selector block contains this @extend"
+  let depth = 0;
+  const stack: Array<{ text: string; depth: number; line: number }> = [];
+
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const lineRaw = lines[i] ?? "";
+    const cut = firstNonCommentIdx(lineRaw);
+    const line = lineRaw.slice(0, cut);
+    const depthBefore = depth;
+
+    // 1) collect @extend matches (based on current container stack)
+    if (line.includes("@extend") && line.includes(token)) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line))) {
+        const container = pickContainer(stack);
+        refs.push({
+          uri,
+          pos: new vscode.Position(i, m.index),
+          containerText: container?.text ?? null,
+          containerLine: container?.line ?? null,
+        });
+      }
+    }
+
+    // 2) push selector blocks that open here (heuristic)
+    const braceIdx = line.indexOf("{");
+    if (braceIdx >= 0) {
+      const sel = line.slice(0, braceIdx).trim();
+      if (sel.length > 0) {
+        // We record the depth *inside* this new block.
+        stack.push({ text: sel, depth: depthBefore + 1, line: i });
+      }
+    }
+
+    depth += braceDelta(lineRaw);
+    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
+    if (refs.length >= 200) break;
+  }
+
+  return refs;
+}
 
 async function findExtendReferences(
   placeholderName: string
-): Promise<vscode.Location[]> {
+): Promise<ExtendRef[]> {
   const key = placeholderName;
-  const cached = extendRefsCache.get(key);
+  const cached = extendRefsCache2.get(key);
   const now = Date.now();
-  if (cached && now - cached.ts < 1500) return cached.locs;
-
-  const locs: vscode.Location[] = [];
-  const re = new RegExp(`@extend\\s+%${escapeRegExp(placeholderName)}\\b`, "g");
+  if (cached && now - cached.ts < 1500) return cached.refs;
 
   const files = await vscode.workspace.findFiles(
     "**/*.{scss,sass}",
     "**/{node_modules,dist,build}/**"
   );
 
-  // Scan each file line-by-line so we can return stable (line, ch) positions.
+  const refs: ExtendRef[] = [];
+
+  // Scan each file line-by-line so we can return stable (line, ch) positions + container selector.
   for (const file of files) {
     const text = await readTextFile(file);
     if (!text) continue;
     if (!text.includes("@extend") || !text.includes(`%${placeholderName}`)) continue;
 
-    const lines = text.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? "";
-      if (!line.includes("@extend") || !line.includes(`%${placeholderName}`)) continue;
-
-      re.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(line))) {
-        locs.push(new vscode.Location(file, new vscode.Position(i, m.index)));
-        if (locs.length >= 200) break;
-      }
-      if (locs.length >= 200) break;
+    const found = scanExtendRefsInText(file, text, placeholderName);
+    for (const r of found) {
+      refs.push(r);
+      if (refs.length >= 200) break;
     }
-    if (locs.length >= 200) break;
+    if (refs.length >= 200) break;
   }
 
-  extendRefsCache.set(key, { ts: now, locs });
-  return locs;
+  extendRefsCache2.set(key, { ts: now, refs });
+  return refs;
 }
 
 function findDirectPlaceholderDefinitionOnLine(
@@ -821,30 +956,33 @@ class ScssAliasHoverProvider implements vscode.HoverProvider {
   ): Promise<vscode.Hover | null> {
     if (!isFileUri(document.uri)) return null;
 
+    const lines = document.getText().split(/\r?\n/);
+
     // 1) Direct %placeholder hover
     const direct = getPlaceholderNameUnderCursor(document, position);
+
     // 2) Nested & chain hover (infer flattened placeholder name)
+    // Prefer this when hovering inside an `&...` selector context.
     let inferred: string | null = null;
-    if (!direct) {
-      const amp = getAmpSegmentUnderCursor(document, position);
-      if (amp) {
-        const lines = document.getText().split(/\r?\n/);
-        inferred = inferNestedPlaceholderNameAtLine(lines, position.line);
-      }
+    const amp = getAmpSegmentUnderCursor(document, position);
+    if (amp) {
+      inferred =
+        inferPlaceholderNameFromOpenStack(lines, position.line) ??
+        inferNestedPlaceholderNameAtLine(lines, position.line);
     }
 
-    const name = direct ?? inferred;
+    const name = inferred ?? direct;
     if (!name) return null;
 
     // Avoid showing this hover on @extend lines (it gets noisy)
     const lineText = document.lineAt(position.line).text;
     if (lineText.includes("@extend")) return null;
 
-    const locs = await findExtendReferences(name);
+    const refs = await findExtendReferences(name);
     const md = new vscode.MarkdownString();
     md.isTrusted = true;
     md.appendMarkdown(`**%${name}**\n\n`);
-    md.appendMarkdown(`@extend references in workspace: **${locs.length}**\n\n`);
+    md.appendMarkdown(`@extend references in workspace: **${refs.length}**\n\n`);
 
     const showAllArgs = [document.uri.toString(), name];
     const showAllUri = vscode.Uri.parse(
@@ -852,19 +990,21 @@ class ScssAliasHoverProvider implements vscode.HoverProvider {
     );
     md.appendMarkdown(`[Show all references](${showAllUri.toString()})\n\n`);
 
-    const top = locs.slice(0, 8);
+    const top = refs.slice(0, 8);
     if (top.length > 0) {
       md.appendMarkdown(`**Top matches**\n\n`);
-      for (const l of top) {
-        const openArgs = [l.uri.toString(), l.range.start.line, l.range.start.character];
+      for (const r of top) {
+        const openArgs = [r.uri.toString(), r.pos.line, r.pos.character];
         const openUri = vscode.Uri.parse(
           `command:${OPEN_LOCATION_CMD}?${encodeURIComponent(JSON.stringify(openArgs))}`
         );
+        const container =
+          r.containerText && r.containerText.length > 0 ? `\`${r.containerText}\` — ` : "";
         md.appendMarkdown(
-          `- [${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}](${openUri.toString()})\n`
+          `- ${container}[${path.basename(r.uri.fsPath)}:${r.pos.line + 1}](${openUri.toString()})\n`
         );
       }
-      if (locs.length > top.length) md.appendMarkdown(`\n… and ${locs.length - top.length} more\n`);
+      if (refs.length > top.length) md.appendMarkdown(`\n… and ${refs.length - top.length} more\n`);
     }
 
     return new vscode.Hover(md);
@@ -948,22 +1088,22 @@ export function activate(context: vscode.ExtensionContext) {
       async (_fromUriString: string, placeholder: string) => {
         try {
           out?.appendLine(`[cmd] showPlaceholderExtends: %${placeholder}`);
-          const locs = await findExtendReferences(placeholder);
-          if (locs.length === 0) {
+          const refs = await findExtendReferences(placeholder);
+          if (refs.length === 0) {
             vscode.window.showInformationMessage(
               `SCSS Alias Jump: @extend %${placeholder} 사용처를 찾지 못했어요.`
             );
             return;
           }
 
-          const items = locs.map((l) => ({
-            label: `${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}`,
-            description: l.uri.fsPath,
-            loc: l,
+          const items = refs.map((r) => ({
+            label: `${r.containerText ? `${r.containerText} — ` : ""}${path.basename(r.uri.fsPath)}:${r.pos.line + 1}`,
+            description: r.uri.fsPath,
+            loc: new vscode.Location(r.uri, r.pos),
           }));
 
           const picked = await vscode.window.showQuickPick(items, {
-            placeHolder: `@extend %${placeholder} 사용처 (${locs.length}개)`,
+            placeHolder: `@extend %${placeholder} 사용처 (${refs.length}개)`,
             matchOnDescription: true,
           });
           if (!picked) return;

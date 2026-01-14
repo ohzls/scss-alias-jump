@@ -56,6 +56,15 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### History
 
+- **0.0.9**
+  - Fixed hover placeholder detection to ignore `%...` tokens in `//` comments and prefer nested `&...` inference
+
+- **0.0.8**
+  - Fixed hover `@extend` usage matching to avoid prefix matches (e.g. `%chat__sources` no longer matches `%chat__sources--overlay`)
+
+- **0.0.7**
+  - Improved hover `@extend` usages to show the enclosing selector/placeholder (container) for each match
+
 - **0.0.6**
   - Added hover to show `@extend %...` usages (QuickPick + jump to location)
 
