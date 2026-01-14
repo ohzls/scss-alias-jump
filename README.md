@@ -38,6 +38,14 @@ Supported definition patterns:
 
 Tip: open **Output → `SCSS Alias Jump`** to see `[hit]`/`[miss]` logs for debugging.
 
+### Hover: find `@extend` usages
+
+Hover on a placeholder definition to see where it’s extended in the current workspace.
+
+- Hover `%chat` → shows `@extend %chat` usages
+- Hover nested selectors inside a placeholder block (heuristic):
+  - `%chat { &__input { &-docker { ... }}}` → hover `&__input` / `&-docker` to search `@extend %chat__input-docker`
+
 ### How it resolves paths
 
 Given an absolute base path (after alias/relative expansion) it tries common Sass resolution candidates:
@@ -47,6 +55,9 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 - `path/index.scss` / `path/_index.scss` (and `.sass`/`.css`)
 
 ### History
+
+- **0.0.6**
+  - Added hover to show `@extend %...` usages (QuickPick + jump to location)
 
 - **0.0.5**
   - Fixed placeholder nested lookup for merged selectors like `&__input-dock` (e.g. `%chat { &__input-dock { ... } }`)

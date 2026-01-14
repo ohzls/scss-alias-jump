@@ -8,6 +8,8 @@ const EXTEND_PLACEHOLDER_RE = /@extend\s+%([A-Za-z0-9_-]+)\b/g;
 
 let out: vscode.OutputChannel | null = null;
 const OPEN_EXTEND_PLACEHOLDER_CMD = "scss-alias-jump.openExtendPlaceholder";
+const SHOW_PLACEHOLDER_EXTENDS_CMD = "scss-alias-jump.showPlaceholderExtends";
+const OPEN_LOCATION_CMD = "scss-alias-jump.openLocation";
 
 function getAliases(): AliasMap {
   const cfg = vscode.workspace.getConfiguration();
@@ -147,6 +149,151 @@ function hasBraceSoon(lines: string[], fromLine: number, tokenEndCh: number) {
   }
 
   return false;
+}
+
+function getPlaceholderNameUnderCursor(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): string | null {
+  const pctRange = document.getWordRangeAtPosition(position, /%[A-Za-z0-9_-]+/);
+  if (pctRange) {
+    const t = document.getText(pctRange);
+    if (t.startsWith("%") && t.length > 1) return t.slice(1);
+  }
+  return null;
+}
+
+function getAmpSegmentUnderCursor(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): string | null {
+  const r = document.getWordRangeAtPosition(position, /&[A-Za-z0-9_-]+/);
+  if (!r) return null;
+  const t = document.getText(r);
+  if (t.startsWith("&") && t.length > 1) return t.slice(1);
+  return null;
+}
+
+function findNearestEnclosingPlaceholderOpenLine(
+  lines: string[],
+  atLine: number
+): { name: string; openLine: number } | null {
+  const re = /%([A-Za-z0-9_-]+)/g;
+  for (let i = atLine; i >= 0; i--) {
+    const line = lines[i] ?? "";
+    if (line.includes("@extend")) continue;
+    re.lastIndex = 0;
+    const m = re.exec(line);
+    if (!m) continue;
+    const name = m[1];
+    const idx = m.index;
+    const token = `%${name}`;
+    // Ensure this looks like a definition selector line
+    if (!tokenBoundaryOk(line, idx, token.length)) continue;
+    if (!hasBraceSoon(lines, i, idx + token.length)) continue;
+
+    // Ensure we're inside its block at atLine by tracking braces from the opening brace line
+    const braceLine = findOpeningBraceLine(lines, i, 8);
+    if (braceLine == null) continue;
+    let depth = 0;
+    for (let j = braceLine; j <= atLine; j++) {
+      depth += braceDelta(lines[j] ?? "");
+      if (j === braceLine && depth <= 0) {
+        // one-liner block, doesn't enclose anything beyond
+        break;
+      }
+    }
+    if (depth > 0) return { name, openLine: braceLine };
+  }
+  return null;
+}
+
+function inferNestedPlaceholderNameAtLine(
+  lines: string[],
+  lineNo: number
+): string | null {
+  const base = findNearestEnclosingPlaceholderOpenLine(lines, lineNo);
+  if (!base) return null;
+
+  // Walk from base.openLine to lineNo and track nested & blocks by brace depth.
+  // This is heuristic but works well for the common style:
+  // %chat { &__input { &-docker { ... } } }
+  let relDepth = 0;
+  const segStack: Array<{ seg: string; depth: number }> = [];
+  const ampRe = /&[A-Za-z0-9_-]+/;
+
+  for (let i = base.openLine; i <= lineNo; i++) {
+    const line = lines[i] ?? "";
+    const depthBefore = relDepth;
+
+    // Pop segments when we leave their depth (after processing previous line's closings)
+    while (segStack.length > 0 && depthBefore < segStack[segStack.length - 1].depth) {
+      segStack.pop();
+    }
+
+    if (i !== base.openLine && depthBefore >= 1) {
+      const m = ampRe.exec(line);
+      if (m) {
+        const seg = m[0].slice(1);
+        // Only treat as a nested selector if it actually opens a block (same line).
+        // (If brace is on next line, we keep it simple and skip.)
+        if (line.includes("{")) {
+          // Assume 1-level open for this selector line.
+          segStack.push({ seg, depth: depthBefore + 1 });
+        }
+      }
+    }
+
+    relDepth += braceDelta(line);
+  }
+
+  const suffix = segStack.map((s) => s.seg).join("");
+  return `${base.name}${suffix}`;
+}
+
+type ExtendRefsCacheEntry = { ts: number; locs: vscode.Location[] };
+const extendRefsCache = new Map<string, ExtendRefsCacheEntry>();
+
+async function findExtendReferences(
+  placeholderName: string
+): Promise<vscode.Location[]> {
+  const key = placeholderName;
+  const cached = extendRefsCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.ts < 1500) return cached.locs;
+
+  const locs: vscode.Location[] = [];
+  const re = new RegExp(`@extend\\s+%${escapeRegExp(placeholderName)}\\b`, "g");
+
+  const files = await vscode.workspace.findFiles(
+    "**/*.{scss,sass}",
+    "**/{node_modules,dist,build}/**"
+  );
+
+  // Scan each file line-by-line so we can return stable (line, ch) positions.
+  for (const file of files) {
+    const text = await readTextFile(file);
+    if (!text) continue;
+    if (!text.includes("@extend") || !text.includes(`%${placeholderName}`)) continue;
+
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
+      if (!line.includes("@extend") || !line.includes(`%${placeholderName}`)) continue;
+
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line))) {
+        locs.push(new vscode.Location(file, new vscode.Position(i, m.index)));
+        if (locs.length >= 200) break;
+      }
+      if (locs.length >= 200) break;
+    }
+    if (locs.length >= 200) break;
+  }
+
+  extendRefsCache.set(key, { ts: now, locs });
+  return locs;
 }
 
 function findDirectPlaceholderDefinitionOnLine(
@@ -667,12 +814,70 @@ class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvider {
   }
 }
 
+class ScssAliasHoverProvider implements vscode.HoverProvider {
+  async provideHover(
+    document: vscode.TextDocument,
+    position: vscode.Position
+  ): Promise<vscode.Hover | null> {
+    if (!isFileUri(document.uri)) return null;
+
+    // 1) Direct %placeholder hover
+    const direct = getPlaceholderNameUnderCursor(document, position);
+    // 2) Nested & chain hover (infer flattened placeholder name)
+    let inferred: string | null = null;
+    if (!direct) {
+      const amp = getAmpSegmentUnderCursor(document, position);
+      if (amp) {
+        const lines = document.getText().split(/\r?\n/);
+        inferred = inferNestedPlaceholderNameAtLine(lines, position.line);
+      }
+    }
+
+    const name = direct ?? inferred;
+    if (!name) return null;
+
+    // Avoid showing this hover on @extend lines (it gets noisy)
+    const lineText = document.lineAt(position.line).text;
+    if (lineText.includes("@extend")) return null;
+
+    const locs = await findExtendReferences(name);
+    const md = new vscode.MarkdownString();
+    md.isTrusted = true;
+    md.appendMarkdown(`**%${name}**\n\n`);
+    md.appendMarkdown(`@extend references in workspace: **${locs.length}**\n\n`);
+
+    const showAllArgs = [document.uri.toString(), name];
+    const showAllUri = vscode.Uri.parse(
+      `command:${SHOW_PLACEHOLDER_EXTENDS_CMD}?${encodeURIComponent(JSON.stringify(showAllArgs))}`
+    );
+    md.appendMarkdown(`[Show all references](${showAllUri.toString()})\n\n`);
+
+    const top = locs.slice(0, 8);
+    if (top.length > 0) {
+      md.appendMarkdown(`**Top matches**\n\n`);
+      for (const l of top) {
+        const openArgs = [l.uri.toString(), l.range.start.line, l.range.start.character];
+        const openUri = vscode.Uri.parse(
+          `command:${OPEN_LOCATION_CMD}?${encodeURIComponent(JSON.stringify(openArgs))}`
+        );
+        md.appendMarkdown(
+          `- [${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}](${openUri.toString()})\n`
+        );
+      }
+      if (locs.length > top.length) md.appendMarkdown(`\n… and ${locs.length - top.length} more\n`);
+    }
+
+    return new vscode.Hover(md);
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   out = vscode.window.createOutputChannel("SCSS Alias Jump");
   out.appendLine(`[activate] SCSS Alias Jump 활성화됨`);
 
   const provider = new ScssAliasDefinitionProvider();
   const linkProvider = new ScssAliasDocumentLinkProvider();
+  const hoverProvider = new ScssAliasHoverProvider();
 
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(
@@ -684,6 +889,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerDocumentLinkProvider(
       [{ language: "scss" }, { language: "sass" }, { language: "css" }],
       linkProvider
+    )
+  );
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(
+      [{ language: "scss" }, { language: "sass" }],
+      hoverProvider
     )
   );
 
@@ -726,6 +937,62 @@ export function activate(context: vscode.ExtensionContext) {
           });
         } catch (e) {
           out?.appendLine(`[err] openExtendPlaceholder failed: ${String(e)}`);
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      SHOW_PLACEHOLDER_EXTENDS_CMD,
+      async (_fromUriString: string, placeholder: string) => {
+        try {
+          out?.appendLine(`[cmd] showPlaceholderExtends: %${placeholder}`);
+          const locs = await findExtendReferences(placeholder);
+          if (locs.length === 0) {
+            vscode.window.showInformationMessage(
+              `SCSS Alias Jump: @extend %${placeholder} 사용처를 찾지 못했어요.`
+            );
+            return;
+          }
+
+          const items = locs.map((l) => ({
+            label: `${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}`,
+            description: l.uri.fsPath,
+            loc: l,
+          }));
+
+          const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `@extend %${placeholder} 사용처 (${locs.length}개)`,
+            matchOnDescription: true,
+          });
+          if (!picked) return;
+
+          await vscode.window.showTextDocument(picked.loc.uri, {
+            selection: picked.loc.range,
+            preview: true,
+            preserveFocus: false,
+          });
+        } catch (e) {
+          out?.appendLine(`[err] showPlaceholderExtends failed: ${String(e)}`);
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      OPEN_LOCATION_CMD,
+      async (uriString: string, line: number, ch: number) => {
+        try {
+          const uri = vscode.Uri.parse(uriString);
+          await vscode.window.showTextDocument(uri, {
+            selection: new vscode.Range(line, ch, line, ch),
+            preview: true,
+            preserveFocus: false,
+          });
+        } catch (e) {
+          out?.appendLine(`[err] openLocation failed: ${String(e)}`);
         }
       }
     )
