@@ -1,21 +1,25 @@
 {
   "name": "scss-alias-jump",
+  "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "MIT",
   "private": false,
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": [
-    "Other"
-  ],
+    "repository": {
+    "type": "git",
+    "url": "https://github.com/ohzls/scss-alias-jump"
+  },
+  "categories": ["Programming Languages"],
   "activationEvents": [
     "onLanguage:scss",
     "onLanguage:sass",
     "onLanguage:css"
   ],
+  "icon": "icon.png",
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
