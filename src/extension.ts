@@ -256,6 +256,17 @@ function findNestedChainInBlock(
 ): { line: number; ch: number } | null {
   if (remainingParts.length === 0) return null;
 
+  const buildNeedles = (parts: string[]) => {
+    // Allow merged parts on a single selector line, e.g.
+    // remainingParts ["__input","-dock"] can appear as "&__input-dock { ... }"
+    // Try longest merged needle first.
+    const out: Array<{ needle: string; consume: number }> = [];
+    for (let k = parts.length; k >= 1; k--) {
+      out.push({ needle: `&${parts.slice(0, k).join("")}`, consume: k });
+    }
+    return out;
+  };
+
   // We only consider selectors at the "top-level" inside this block.
   // We'll walk and track relative depth; when depthBefore === 1, we're at top-level inside the block.
   let depth = 0;
@@ -269,21 +280,23 @@ function findNestedChainInBlock(
     }
 
     if (depthBefore === 1) {
-      const needle = `&${remainingParts[0]}`;
-      const hitAt = line.indexOf(needle);
-      if (hitAt >= 0) {
+      for (const cand of buildNeedles(remainingParts)) {
+        const hitAt = line.indexOf(cand.needle);
+        if (hitAt < 0) continue;
+
         const openJ = findOpeningBraceLine(lines, i, 6);
-        if (openJ != null && openJ <= blockEndLine) {
-          const nestedEnd = findBlockEndLine(lines, openJ);
-          if (remainingParts.length === 1) return { line: i, ch: hitAt };
-          const deeper = findNestedChainInBlock(
-            lines,
-            openJ,
-            Math.min(nestedEnd, blockEndLine),
-            remainingParts.slice(1)
-          );
-          if (deeper) return deeper;
-        }
+        if (openJ == null || openJ > blockEndLine) continue;
+
+        const nestedEnd = findBlockEndLine(lines, openJ);
+        if (cand.consume === remainingParts.length) return { line: i, ch: hitAt };
+
+        const deeper = findNestedChainInBlock(
+          lines,
+          openJ,
+          Math.min(nestedEnd, blockEndLine),
+          remainingParts.slice(cand.consume)
+        );
+        if (deeper) return deeper;
       }
     }
 
