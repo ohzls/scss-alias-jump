@@ -56,6 +56,9 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### History
 
+- **0.0.13**
+  - Added hover + QuickPick to find usages of CSS classes (React/Vue/Svelte) when hovering on `.class` selectors in SCSS
+
 - **0.0.12**
   - Fixed placeholder jump for camelCase nested placeholders (e.g. `%chatShellMain` from `%chatShell { &Main { ... } }`)
 

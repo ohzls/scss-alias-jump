@@ -10,6 +10,7 @@ let out: vscode.OutputChannel | null = null;
 const OPEN_EXTEND_PLACEHOLDER_CMD = "scss-alias-jump.openExtendPlaceholder";
 const SHOW_PLACEHOLDER_EXTENDS_CMD = "scss-alias-jump.showPlaceholderExtends";
 const OPEN_LOCATION_CMD = "scss-alias-jump.openLocation";
+const SHOW_CLASS_USAGES_CMD = "scss-alias-jump.showClassUsages";
 
 function getAliases(): AliasMap {
   const cfg = vscode.workspace.getConfiguration();
@@ -449,6 +450,162 @@ function pickContainer(stack: Array<{ text: string; depth: number; line: number 
     if (!t.startsWith("@")) return stack[i];
   }
   return stack.length > 0 ? stack[stack.length - 1] : null;
+}
+
+function getCssClassUnderCursor(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): { className: string; range: vscode.Range } | null {
+  const lineText = document.lineAt(position.line).text;
+  const commentIdx = lineText.indexOf("//");
+  if (commentIdx >= 0 && position.character >= commentIdx) return null;
+
+  const range = document.getWordRangeAtPosition(position, /\.[A-Za-z0-9_-]+/);
+  if (!range) return null;
+  const t = document.getText(range);
+  if (!t.startsWith(".") || t.length <= 1) return null;
+  return { className: t.slice(1), range };
+}
+
+function buildOpenSelectorStack(
+  lines: string[],
+  lineNo: number
+): Array<{ text: string; depth: number; line: number }> {
+  let depth = 0;
+  const stack: Array<{ text: string; depth: number; line: number }> = [];
+
+  for (let i = 0; i <= lineNo; i++) {
+    const raw = lines[i] ?? "";
+    const cut = firstNonCommentIdx(raw);
+    const line = raw.slice(0, cut);
+    const depthBefore = depth;
+
+    const braceIdx = line.indexOf("{");
+    if (braceIdx >= 0) {
+      const sel = line.slice(0, braceIdx).trim();
+      if (sel.length > 0) {
+        stack.push({ text: sel, depth: depthBefore + 1, line: i });
+      }
+    }
+
+    depth += braceDelta(raw);
+    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
+  }
+
+  return stack;
+}
+
+function inferCssClassNameAtLine(
+  lines: string[],
+  lineNo: number
+): string | null {
+  const stack = buildOpenSelectorStack(lines, lineNo);
+  const classRe = /\.([A-Za-z0-9_-]+)/;
+  const ampRe = /&[A-Za-z0-9_-]+/;
+
+  // Find nearest base ".class" in the open stack.
+  let baseIdx = -1;
+  let baseClass: string | null = null;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const t = stack[i]?.text ?? "";
+    const m = classRe.exec(t);
+    if (m) {
+      baseIdx = i;
+      baseClass = m[1];
+      break;
+    }
+  }
+  if (!baseClass) return null;
+
+  // Apply & suffixes after the base selector, e.g. `.foo { &-bar { ... } }` -> foo-bar
+  let outName = baseClass;
+  for (let i = baseIdx + 1; i < stack.length; i++) {
+    const t = stack[i]?.text ?? "";
+    const m = ampRe.exec(t);
+    if (!m) continue;
+    const seg = m[0].slice(1);
+    // Only support concatenation-style segments (&Something / &-something / &__something)
+    if (!/^[A-Za-z0-9_-]+$/.test(seg)) continue;
+    outName += seg;
+  }
+  return outName;
+}
+
+type ClassUsage = {
+  uri: vscode.Uri;
+  pos: vscode.Position;
+  hint: string | null;
+};
+
+type ClassUsageCacheEntry = { ts: number; refs: ClassUsage[] };
+const classUsageCache = new Map<string, ClassUsageCacheEntry>();
+
+function fileHintFromPath(uri: vscode.Uri) {
+  const b = path.basename(uri.fsPath);
+  return b;
+}
+
+function lineHasClassUsageSignal(line: string) {
+  return (
+    line.includes("class=") ||
+    line.includes("className=") ||
+    line.includes(":class") ||
+    line.includes("v-bind:class") ||
+    line.includes("class:") ||
+    line.includes("clsx(") ||
+    line.includes("classnames(")
+  );
+}
+
+async function findClassUsages(className: string): Promise<ClassUsage[]> {
+  const key = className;
+  const cached = classUsageCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.ts < 1500) return cached.refs;
+
+  const refs: ClassUsage[] = [];
+  const token = className;
+
+  const files = await vscode.workspace.findFiles(
+    "**/*.{ts,tsx,js,jsx,vue,svelte,html}",
+    "**/{node_modules,dist,build}/**"
+  );
+
+  for (const file of files) {
+    const text = await readTextFile(file);
+    if (!text) continue;
+    if (!text.includes(token)) continue;
+
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i] ?? "";
+      const cut = firstNonCommentIdx(raw);
+      const line = raw.slice(0, cut);
+      if (!line.includes(token)) continue;
+      if (!lineHasClassUsageSignal(line)) continue;
+
+      // Find occurrences and apply identifier boundary checks (avoid matching "foo" in "foo-bar").
+      let from = 0;
+      while (true) {
+        const idx = line.indexOf(token, from);
+        if (idx < 0) break;
+        from = idx + token.length;
+        if (!tokenBoundaryOk(line, idx, token.length)) continue;
+
+        refs.push({
+          uri: file,
+          pos: new vscode.Position(i, idx),
+          hint: fileHintFromPath(file),
+        });
+        if (refs.length >= 200) break;
+      }
+      if (refs.length >= 200) break;
+    }
+    if (refs.length >= 200) break;
+  }
+
+  classUsageCache.set(key, { ts: now, refs });
+  return refs;
 }
 
 function scanExtendRefsInText(
@@ -1153,6 +1310,50 @@ class ScssAliasHoverProvider implements vscode.HoverProvider {
 
     const lines = document.getText().split(/\r?\n/);
 
+    // CSS class usage hover (from SCSS selector to React/Vue/Svelte usage)
+    {
+      const directClass = getCssClassUnderCursor(document, position);
+      const amp = getAmpSegmentUnderCursor(document, position);
+      const inferred = amp ? inferCssClassNameAtLine(lines, position.line) : null;
+      const className = directClass?.className ?? inferred;
+
+      if (className) {
+        // Avoid showing this hover on @extend lines (it gets noisy)
+        const lineText = document.lineAt(position.line).text;
+        if (!lineText.includes("@extend")) {
+          const refs = await findClassUsages(className);
+          const md = new vscode.MarkdownString();
+          md.isTrusted = true;
+          md.appendMarkdown(`**.${className}**\n\n`);
+          md.appendMarkdown(`class usages in workspace: **${refs.length}**\n\n`);
+
+          const showAllArgs = [document.uri.toString(), className];
+          const showAllUri = vscode.Uri.parse(
+            `command:${SHOW_CLASS_USAGES_CMD}?${encodeURIComponent(JSON.stringify(showAllArgs))}`
+          );
+          md.appendMarkdown(`[Show all usages](${showAllUri.toString()})\n\n`);
+
+          const top = refs.slice(0, 8);
+          if (top.length > 0) {
+            md.appendMarkdown(`**Top matches**\n\n`);
+            for (const r of top) {
+              const openArgs = [r.uri.toString(), r.pos.line, r.pos.character];
+              const openUri = vscode.Uri.parse(
+                `command:${OPEN_LOCATION_CMD}?${encodeURIComponent(JSON.stringify(openArgs))}`
+              );
+              const hint = r.hint ? `\`${r.hint}\` — ` : "";
+              md.appendMarkdown(
+                `- ${hint}[${path.basename(r.uri.fsPath)}:${r.pos.line + 1}](${openUri.toString()})\n`
+              );
+            }
+            if (refs.length > top.length) md.appendMarkdown(`\n… and ${refs.length - top.length} more\n`);
+          }
+
+          return new vscode.Hover(md);
+        }
+      }
+    }
+
     // 1) Direct %placeholder hover
     const direct = getPlaceholderNameUnderCursor(document, position);
 
@@ -1310,6 +1511,44 @@ export function activate(context: vscode.ExtensionContext) {
           });
         } catch (e) {
           out?.appendLine(`[err] showPlaceholderExtends failed: ${String(e)}`);
+        }
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      SHOW_CLASS_USAGES_CMD,
+      async (_fromUriString: string, className: string) => {
+        try {
+          out?.appendLine(`[cmd] showClassUsages: .${className}`);
+          const refs = await findClassUsages(className);
+          if (refs.length === 0) {
+            vscode.window.showInformationMessage(
+              `SCSS Alias Jump: .${className} 사용처를 찾지 못했어요.`
+            );
+            return;
+          }
+
+          const items = refs.map((r) => ({
+            label: `${path.basename(r.uri.fsPath)}:${r.pos.line + 1}`,
+            description: r.uri.fsPath,
+            loc: new vscode.Location(r.uri, r.pos),
+          }));
+
+          const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `.${className} 사용처 (${refs.length}개)`,
+            matchOnDescription: true,
+          });
+          if (!picked) return;
+
+          await vscode.window.showTextDocument(picked.loc.uri, {
+            selection: picked.loc.range,
+            preview: true,
+            preserveFocus: false,
+          });
+        } catch (e) {
+          out?.appendLine(`[err] showClassUsages failed: ${String(e)}`);
         }
       }
     )
