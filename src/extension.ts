@@ -592,6 +592,33 @@ function splitPlaceholderName(placeholderName: string): {
 } {
   const seps = ["__", "--", "_", "-"] as const;
 
+  const splitCamel = (s: string) => {
+    // Split camelCase / PascalCase while keeping acronyms together:
+    // - boundary when Upper follows lower/digit: "chatShell" -> "chat" + "Shell"
+    // - boundary within acronym before a trailing CapitalLower: "URLValue" -> "URL" + "Value"
+    const parts: string[] = [];
+    let start = 0;
+    for (let i = 1; i < s.length; i++) {
+      const prev = s[i - 1] ?? "";
+      const cur = s[i] ?? "";
+      const next = s[i + 1] ?? "";
+      const prevIsLowerOrDigit = /[a-z0-9]/.test(prev);
+      const curIsUpper = /[A-Z]/.test(cur);
+      const prevIsUpper = /[A-Z]/.test(prev);
+      const nextIsLower = /[a-z]/.test(next);
+
+      const boundary = (curIsUpper && prevIsLowerOrDigit) || (prevIsUpper && curIsUpper && nextIsLower);
+      if (boundary) {
+        const seg = s.slice(start, i);
+        if (seg) parts.push(seg);
+        start = i;
+      }
+    }
+    const last = s.slice(start);
+    if (last) parts.push(last);
+    return parts;
+  };
+
   const findNextSep = (s: string, from: number) => {
     let bestIdx = -1;
     let bestSep: (typeof seps)[number] | null = null;
@@ -608,6 +635,15 @@ function splitPlaceholderName(placeholderName: string): {
 
   const first = findNextSep(placeholderName, 1);
   if (first.idx === -1 || !first.sep) {
+    // CamelCase fallback: %chatShellMain defined as `%chatShell { &Main { ... } }`
+    // We split into ["chat","Shell","Main"] so root="chat" and parts=["Shell","Main"].
+    // This enables prefix candidates like "chatShell" and nested lookup for "&Main".
+    if (/[A-Z]/.test(placeholderName)) {
+      const camelParts = splitCamel(placeholderName);
+      if (camelParts.length >= 2) {
+        return { root: camelParts[0], parts: camelParts.slice(1) };
+      }
+    }
     return { root: placeholderName, parts: [] };
   }
 
@@ -681,16 +717,16 @@ function findNestedChainInBlock(
         const openJ = findOpeningBraceLine(lines, i, 6);
         if (openJ == null || openJ > blockEndLine) continue;
 
-        const nestedEnd = findBlockEndLine(lines, openJ);
+          const nestedEnd = findBlockEndLine(lines, openJ);
         if (cand.consume === remainingParts.length) return { line: i, ch: hitAt };
 
-        const deeper = findNestedChainInBlock(
-          lines,
-          openJ,
-          Math.min(nestedEnd, blockEndLine),
+          const deeper = findNestedChainInBlock(
+            lines,
+            openJ,
+            Math.min(nestedEnd, blockEndLine),
           remainingParts.slice(cand.consume)
-        );
-        if (deeper) return deeper;
+          );
+          if (deeper) return deeper;
       }
     }
 

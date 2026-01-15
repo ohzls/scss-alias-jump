@@ -56,6 +56,9 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### History
 
+- **0.0.12**
+  - Fixed placeholder jump for camelCase nested placeholders (e.g. `%chatShellMain` from `%chatShell { &Main { ... } }`)
+
 - **0.0.11**
   - Fixed namespaced Sass variable resolution to bind to the exact token under cursor (prevents `answer.$margin-bottom` / `progress.$margin-bottom` mixups)
 
