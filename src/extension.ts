@@ -184,6 +184,118 @@ function getAmpSegmentUnderCursor(
   return null;
 }
 
+function getNamespacedVarRefUnderCursor(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): { namespace: string; varName: string; range: vscode.Range } | null {
+  const lineText = document.lineAt(position.line).text;
+  const commentIdx = lineText.indexOf("//");
+  if (commentIdx >= 0 && position.character >= commentIdx) return null;
+
+  const range = document.getWordRangeAtPosition(
+    position,
+    /[A-Za-z0-9_-]+\.\$[A-Za-z0-9_-]+/
+  );
+  if (!range) return null;
+  const t = document.getText(range);
+  const m = /^([A-Za-z0-9_-]+)\.\$([A-Za-z0-9_-]+)$/.exec(t);
+  if (!m) return null;
+  return { namespace: m[1], varName: m[2], range };
+}
+
+function deriveDefaultNamespace(importPath: string) {
+  // Sass default namespace = basename without leading underscore and without extension.
+  const p = ensureNoExt(importPath.trim());
+  const base = path.posix.basename(p);
+  return base.replace(/^_/, "");
+}
+
+function parseUseNamespaceMap(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const lines = text.split(/\r?\n/);
+  // @use 'path' as name;
+  // @use "path";
+  // @use 'path' as *;
+  const re = /@use\s+(['"])([^'"]+)\1(?:\s+as\s+([A-Za-z0-9_-]+|\*))?/;
+
+  for (const raw of lines) {
+    const cut = firstNonCommentIdx(raw);
+    const line = raw.slice(0, cut);
+    if (!line.includes("@use")) continue;
+    const m = re.exec(line);
+    if (!m) continue;
+    const importPath = m[2];
+    const asName = m[3];
+    if (asName === "*") continue;
+    const ns = asName && asName.length > 0 ? asName : deriveDefaultNamespace(importPath);
+    map.set(ns, importPath);
+  }
+  return map;
+}
+
+async function resolveSassModuleFromUse(
+  importPath: string,
+  fromDoc: vscode.TextDocument
+): Promise<vscode.Uri | null> {
+  const aliases = getAliases();
+  const abs = resolveAliasToAbsolute(importPath, fromDoc.uri.fsPath, aliases, fromDoc.uri);
+  if (!abs) return null;
+  const resolved = await resolveSassPath(ensureNoExt(abs));
+  if (!resolved) return null;
+  return vscode.Uri.file(resolved);
+}
+
+async function findVariableDefinitionInModule(
+  moduleUri: vscode.Uri,
+  varName: string,
+  visited: Set<string>
+): Promise<vscode.Location | null> {
+  const key = moduleUri.toString();
+  if (visited.has(key)) return null;
+  visited.add(key);
+
+  const text = await readTextFile(moduleUri);
+  if (!text) return null;
+
+  // 1) Direct variable definition
+  const re = new RegExp(`\\$${escapeRegExp(varName)}\\s*:`);
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    const cut = firstNonCommentIdx(raw);
+    const line = raw.slice(0, cut);
+    if (!line.includes(`$${varName}`)) continue;
+    const idx = line.search(re);
+    if (idx < 0) continue;
+    return new vscode.Location(moduleUri, new vscode.Position(i, idx));
+  }
+
+  // 2) Follow @forward chain (common in variables modules)
+  const forwardRe = /@forward\s+(['"])([^'"]+)\1/g;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    const cut = firstNonCommentIdx(raw);
+    const line = raw.slice(0, cut);
+    if (!line.includes("@forward")) continue;
+
+    forwardRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = forwardRe.exec(line))) {
+      const importPath = m[2];
+      const aliases = getAliases();
+      const abs = resolveAliasToAbsolute(importPath, moduleUri.fsPath, aliases, moduleUri);
+      if (!abs) continue;
+      const resolved = await resolveSassPath(ensureNoExt(abs));
+      if (!resolved) continue;
+      const nextUri = vscode.Uri.file(resolved);
+      const hit = await findVariableDefinitionInModule(nextUri, varName, visited);
+      if (hit) return hit;
+    }
+  }
+
+  return null;
+}
+
 function findNearestEnclosingPlaceholderOpenLine(
   lines: string[],
   atLine: number
@@ -815,7 +927,23 @@ class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
 
     const line = document.lineAt(position.line).text;
 
-    // 0) @extend %placeholder jump
+    // 0) namespace.$var jump (Sass module variables)
+    const varRef = getNamespacedVarRefUnderCursor(document, position);
+    if (varRef) {
+      const uses = parseUseNamespaceMap(document.getText());
+      const importPath = uses.get(varRef.namespace);
+      if (!importPath) return null;
+
+      const moduleUri = await resolveSassModuleFromUse(importPath, document);
+      if (!moduleUri) return null;
+
+      const loc =
+        (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set())) ??
+        new vscode.Location(moduleUri, new vscode.Position(0, 0));
+      return loc;
+    }
+
+    // 1) @extend %placeholder jump
     EXTEND_PLACEHOLDER_RE.lastIndex = 0;
     let em: RegExpExecArray | null;
     while ((em = EXTEND_PLACEHOLDER_RE.exec(line))) {
@@ -955,6 +1083,37 @@ class ScssAliasHoverProvider implements vscode.HoverProvider {
     position: vscode.Position
   ): Promise<vscode.Hover | null> {
     if (!isFileUri(document.uri)) return null;
+
+    // Sass module variable hover: namespace.$var
+    {
+      const varRef = getNamespacedVarRefUnderCursor(document, position);
+      if (varRef) {
+        const uses = parseUseNamespaceMap(document.getText());
+        const importPath = uses.get(varRef.namespace);
+        if (importPath) {
+          const moduleUri = await resolveSassModuleFromUse(importPath, document);
+          if (moduleUri) {
+            const loc =
+              (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set())) ??
+              new vscode.Location(moduleUri, new vscode.Position(0, 0));
+
+            const md = new vscode.MarkdownString();
+            md.isTrusted = true;
+            md.appendMarkdown(`**${varRef.namespace}.$${varRef.varName}**\n\n`);
+
+            const openArgs = [loc.uri.toString(), loc.range.start.line, loc.range.start.character];
+            const openUri = vscode.Uri.parse(
+              `command:${OPEN_LOCATION_CMD}?${encodeURIComponent(JSON.stringify(openArgs))}`
+            );
+            md.appendMarkdown(`[Go to definition](${openUri.toString()})\n\n`);
+            md.appendMarkdown(`- module: \`${moduleUri.fsPath}\`\n`);
+            md.appendMarkdown(`- line: ${loc.range.start.line + 1}\n`);
+
+            return new vscode.Hover(md);
+          }
+        }
+      }
+    }
 
     const lines = document.getText().split(/\r?\n/);
 

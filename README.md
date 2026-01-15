@@ -56,6 +56,12 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### History
 
+- **0.0.11**
+  - Fixed namespaced Sass variable resolution to bind to the exact token under cursor (prevents `answer.$margin-bottom` / `progress.$margin-bottom` mixups)
+
+- **0.0.10**
+  - Added go-to-definition + hover link for Sass module variables like `answer.$markdown-title-padding-left`
+
 - **0.0.9**
   - Fixed hover placeholder detection to ignore `%...` tokens in `//` comments and prefer nested `&...` inference
 
