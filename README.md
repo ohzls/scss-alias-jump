@@ -2,6 +2,8 @@
 
 VS Code extension that enables Cmd/Ctrl+Click (Go to Definition) for SCSS/Sass `@use`, `@forward`, and `@import` paths that use alias prefixes.
 
+**Works in `.scss`, `.sass`, `.vue`, and `.svelte` files** — including Vue/Svelte `<style lang="scss">` blocks.
+
 It also supports **Cmd/Ctrl+Click for Sass placeholder extends**: `@extend %placeholder;`
 
 ### Settings
@@ -13,9 +15,17 @@ Add aliases in your workspace/user settings:
   "scssAliasJump.aliases": {
     "@": "${workspaceFolder:nlrc}/src",
     "@scss": "${workspaceFolder:_assets}/scss"
-  }
+  },
+  "scssAliasJump.debugLogging": false,
+  "scssAliasJump.hoverWorkspaceScan": false
 }
 ```
+
+**Configuration options:**
+
+- **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces.
+- **`scssAliasJump.debugLogging`**: Enable verbose debug logging to Output panel (default: `false`).
+- **`scssAliasJump.hoverWorkspaceScan`**: Enable workspace-wide scans for hover features (class usages / `@extend` references). Disable this in large projects to avoid "Loading..." delays (default: `false`).
 
 ### `@extend %...` (placeholder) jump
 
@@ -55,6 +65,13 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 - `path/index.scss` / `path/_index.scss` (and `.sass`/`.css`)
 
 ### History
+
+- **0.1.16**
+  - **Fixed Vue/Svelte file support**: Stable jump-to-definition for `@use`/`@forward`/`@import` in `<style lang="scss">` blocks
+  - **Multi-root workspace**: Configuration scoping now respects `resource` (each folder can have different aliases)
+  - **Performance**: Parallel path resolution and lazy DocumentLink resolution to prevent cancellation/timeout in large files
+  - **Improved path extraction**: Enhanced `getDocFsPath` to handle Volar/Vue Official virtual documents and embedded content
+  - Added `scssAliasJump.debugLogging` and `scssAliasJump.hoverWorkspaceScan` configuration options
 
 - **0.0.13**
   - Added hover + QuickPick to find usages of CSS classes (React/Vue/Svelte) when hovering on `.class` selectors in SCSS

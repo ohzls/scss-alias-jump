@@ -3,28 +3,50 @@
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases.",
-  "version": "0.0.13",
+  "version": "0.1.15",
   "license": "MIT",
   "private": false,
   "engines": {
     "vscode": "^1.85.0"
   },
-    "repository": {
+  "repository": {
     "type": "git",
     "url": "https://github.com/ohzls/scss-alias-jump"
   },
   "categories": ["Programming Languages"],
   "activationEvents": [
-    "onLanguage:scss",
-    "onLanguage:sass",
-    "onLanguage:css"
+    "onStartupFinished"
   ],
   "icon": "icon.png",
   "main": "./dist/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "scss-alias-jump.debugScanImports",
+        "title": "SCSS Alias Jump: Debug Scan Imports (@use/@forward/@import)"
+      },
+      {
+        "command": "scss-alias-jump.openImportUnderCursor",
+        "title": "SCSS Alias Jump: Open Import Under Cursor"
+      },
+      {
+        "command": "scss-alias-jump.debugClickTest",
+        "title": "SCSS Alias Jump: Debug Click Test (Show Range Info)"
+      }
+    ],
     "configuration": {
       "title": "SCSS Alias Jump",
       "properties": {
+        "scssAliasJump.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable verbose debug logging to the Output panel (can be noisy)."
+        },
+        "scssAliasJump.hoverWorkspaceScan": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable expensive workspace scans for hover features (class usages / %placeholder @extend references). Disable to avoid 'Loading...' in large projects."
+        },
         "scssAliasJump.aliases": {
           "type": "object",
           "default": {},
