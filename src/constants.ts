@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 // Keep in sync with package.json version for debugging.
-export const EXT_VERSION = "0.2.0";
+export const EXT_VERSION = "0.3.0";
 
 export const OUTPUT_CHANNEL_NAME = "SCSS Alias Jump";
 

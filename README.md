@@ -139,7 +139,7 @@ Supports:
 
 ## Recent Updates
 
-### Version 0.2.0 (Latest)
+### Version 0.3.0 (Latest)
 
 - **Bidirectional CSS Modules jump**: 
   - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition

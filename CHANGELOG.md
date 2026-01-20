@@ -5,7 +5,7 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-01-20
+## [0.3.0] - 2026-01-20
 
 ### Added
 - **Bidirectional CSS Modules jump** (React/TypeScript/Next.js):
@@ -126,5 +126,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Link-style behavior for `@extend` via `DocumentLinkProvider` (hover underline / pointer + click)
 - OutputChannel logs (`SCSS Alias Jump`) for easier debugging
 
-[0.2.0]: https://github.com/ohzls/scss-alias-jump/compare/v0.1.16...v0.2.0
+[0.3.0]: https://github.com/ohzls/scss-alias-jump/compare/v0.1.16...v0.3.0
 [0.1.16]: https://github.com/ohzls/scss-alias-jump/releases/tag/v0.1.16
