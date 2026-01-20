@@ -28,7 +28,7 @@ Add aliases in your workspace/user settings:
     "@scss": "${workspaceFolder:_assets}/scss"
   },
   "scssAliasJump.debugLogging": false,
-  "scssAliasJump.hoverWorkspaceScan": false
+  "scssAliasJump.hoverWorkspaceScan": true
 }
 ```
 
@@ -36,7 +36,7 @@ Add aliases in your workspace/user settings:
 
 - **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces.
 - **`scssAliasJump.debugLogging`**: Enable verbose debug logging to Output panel (default: `false`).
-- **`scssAliasJump.hoverWorkspaceScan`**: Enable workspace-wide scans for hover features (class usages / `@extend` references). Disable this in large projects to avoid "Loading..." delays (default: `false`).
+- **`scssAliasJump.hoverWorkspaceScan`**: Enable workspace-wide scans for hover features (class usages / `@extend` references). **Default: `true`**. Disable if experiencing delays in very large projects.
 
 ### `@extend %...` (placeholder) jump
 
@@ -139,7 +139,7 @@ Supports:
 
 ## Recent Updates
 
-### Version 0.3.0 (Latest)
+### Version 0.2.0 (Latest)
 
 - **Bidirectional CSS Modules jump**: 
   - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
@@ -154,6 +154,10 @@ Supports:
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
 
 ### History
+
+- **0.2.0**
+  - (fill)
+
 
 - **0.3.0**
   - (fill)

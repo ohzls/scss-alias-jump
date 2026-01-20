@@ -3,7 +3,7 @@
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
-  "version": "0.3.0",
+  "version": "0.2.0",
   "license": "MIT",
   "private": false,
   "engines": {
@@ -46,8 +46,8 @@
         },
         "scssAliasJump.hoverWorkspaceScan": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable expensive workspace scans for hover features (class usages / %placeholder @extend references). Disable to avoid 'Loading...' in large projects."
+          "default": true,
+          "markdownDescription": "Enable workspace scans for hover features (class usages / %placeholder @extend references). Disable if experiencing 'Loading...' delays in very large projects."
         },
         "scssAliasJump.aliases": {
           "type": "object",
