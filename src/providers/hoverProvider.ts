@@ -1,9 +1,10 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import { SHOW_CLASS_USAGES_CMD, SHOW_PLACEHOLDER_EXTENDS_CMD, OPEN_LOCATION_CMD } from "../constants";
+import { SHOW_CLASS_USAGES_CMD, SHOW_PLACEHOLDER_EXTENDS_CMD, OPEN_LOCATION_CMD, SEARCH_TIMEOUT_MS } from "../constants";
 import { getDocFsPath } from "../docPath";
 import { withTimeout } from "../async";
 import { isHoverWorkspaceScanEnabled } from "../settings";
+import { splitLines, formatFileLocation } from "../strings";
 import {
   getAmpSegmentUnderCursor,
   getCssClassUnderCursor,
@@ -63,7 +64,7 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
       }
     }
 
-    const lines = document.getText().split(/\r?\n/);
+    const lines = splitLines(document.getText());
 
     // CSS class usage hover
     {
@@ -77,7 +78,7 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
         if (token.isCancellationRequested) return null;
         const lineText = document.lineAt(position.line).text;
         if (!lineText.includes("@extend")) {
-          const refs = await withTimeout(findClassUsages(className), 1500).catch(() => []);
+          const refs = await withTimeout(findClassUsages(className), SEARCH_TIMEOUT_MS).catch(() => []);
           const md = new vscode.MarkdownString();
           md.isTrusted = true;
           md.appendMarkdown(`**.${className}**\n\n`);
@@ -99,7 +100,7 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
               );
               const hint = r.hint ? `\`${r.hint}\` — ` : "";
               md.appendMarkdown(
-                `- ${hint}[${path.basename(r.uri.fsPath)}:${r.pos.line + 1}](${openUri.toString()})\n`
+                `- ${hint}[${formatFileLocation(r.uri, r.pos.line)}](${openUri.toString()})\n`
               );
             }
             if (refs.length > top.length) md.appendMarkdown(`\n… and ${refs.length - top.length} more\n`);
@@ -128,7 +129,7 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
     const lineText = document.lineAt(position.line).text;
     if (lineText.includes("@extend")) return null;
 
-    const refs = await withTimeout(findExtendReferences(name), 1500).catch(() => []);
+    const refs = await withTimeout(findExtendReferences(name), SEARCH_TIMEOUT_MS).catch(() => []);
     const md = new vscode.MarkdownString();
     md.isTrusted = true;
     md.appendMarkdown(`**%${name}**\n\n`);
@@ -150,7 +151,7 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
         );
         const container = r.containerText && r.containerText.length > 0 ? `\`${r.containerText}\` — ` : "";
         md.appendMarkdown(
-          `- ${container}[${path.basename(r.uri.fsPath)}:${r.pos.line + 1}](${openUri.toString()})\n`
+          `- ${container}[${formatFileLocation(r.uri, r.pos.line)}](${openUri.toString()})\n`
         );
       }
       if (refs.length > top.length) md.appendMarkdown(`\n… and ${refs.length - top.length} more\n`);

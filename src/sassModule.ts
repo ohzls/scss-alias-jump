@@ -4,8 +4,8 @@ import { getDocFsPath } from "./docPath";
 import { resolveAliasToAbsolute } from "./aliasResolve";
 import { ensureNoExt, resolveSassPathCached } from "./sassResolve";
 import { readTextFile } from "./fsText";
-import { firstNonCommentIdx } from "./textScan";
-import { escapeRegExp } from "./strings";
+import { stripComments } from "./textScan";
+import { escapeRegExp, splitLines } from "./strings";
 
 export async function resolveSassModuleFromUse(
   importPath: string,
@@ -34,11 +34,10 @@ export async function findVariableDefinitionInModule(
   if (!text) return null;
 
   const re = new RegExp(`\\$${escapeRegExp(varName)}\\s*:`);
-  const lines = text.split(/\r?\n/);
+  const lines = splitLines(text);
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i] ?? "";
-    const cut = firstNonCommentIdx(raw);
-    const line = raw.slice(0, cut);
+    const line = stripComments(raw);
     if (!line.includes(`$${varName}`)) continue;
     const idx = line.search(re);
     if (idx < 0) continue;
@@ -48,8 +47,7 @@ export async function findVariableDefinitionInModule(
   const forwardRe = /@forward\s+(['"])([^'"]+)\1/g;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i] ?? "";
-    const cut = firstNonCommentIdx(raw);
-    const line = raw.slice(0, cut);
+    const line = stripComments(raw);
     if (!line.includes("@forward")) continue;
 
     forwardRe.lastIndex = 0;

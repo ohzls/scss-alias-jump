@@ -2,8 +2,8 @@
   "name": "scss-alias-jump",
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
-  "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases.",
-  "version": "0.1.15",
+  "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases. Jump from Vue/Svelte template classes to SCSS definitions.",
+  "version": "0.1.17",
   "license": "MIT",
   "private": false,
   "engines": {

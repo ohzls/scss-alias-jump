@@ -4,7 +4,14 @@ VS Code extension that enables Cmd/Ctrl+Click (Go to Definition) for SCSS/Sass `
 
 **Works in `.scss`, `.sass`, `.vue`, and `.svelte` files** — including Vue/Svelte `<style lang="scss">` blocks.
 
-It also supports **Cmd/Ctrl+Click for Sass placeholder extends**: `@extend %placeholder;`
+### Features
+
+- **`@use`/`@forward`/`@import` path jump**: Cmd/Ctrl+Click on import paths with alias prefixes
+- **`@extend %placeholder` jump**: Jump to placeholder definitions, including nested structures
+- **Template class jump (NEW)**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
+- **SCSS nesting support (NEW)**: Automatically resolves nested selectors like `.chat { &-header-actions { ... } }`
+- **Hover for usages**: Hover on placeholders or class selectors to see usage locations
+- **Sass module variables**: Jump to namespaced variable definitions like `answer.$padding`
 
 ### Settings
 
@@ -64,49 +71,50 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 - `_path.scss` / `_path.sass` / `_path.css`
 - `path/index.scss` / `path/_index.scss` (and `.sass`/`.css`)
 
-### History
+### Template Class Jump (Vue/Svelte)
 
-- **0.1.16**
-  - **Fixed Vue/Svelte file support**: Stable jump-to-definition for `@use`/`@forward`/`@import` in `<style lang="scss">` blocks
-  - **Multi-root workspace**: Configuration scoping now respects `resource` (each folder can have different aliases)
-  - **Performance**: Parallel path resolution and lazy DocumentLink resolution to prevent cancellation/timeout in large files
-  - **Improved path extraction**: Enhanced `getDocFsPath` to handle Volar/Vue Official virtual documents and embedded content
-  - Added `scssAliasJump.debugLogging` and `scssAliasJump.hoverWorkspaceScan` configuration options
+**NEW in 0.1.17**: Jump from template class attributes to SCSS definitions!
 
-- **0.0.13**
-  - Added hover + QuickPick to find usages of CSS classes (React/Vue/Svelte) when hovering on `.class` selectors in SCSS
+In Vue/Svelte templates:
+```vue
+<template>
+  <div class="chat-header-actions">
+    <!-- Cmd/Ctrl+Click on "chat-header-actions" to jump to its SCSS definition -->
+  </div>
+</template>
+```
 
-- **0.0.12**
-  - Fixed placeholder jump for camelCase nested placeholders (e.g. `%chatShellMain` from `%chatShell { &Main { ... } }`)
+Will find definitions in:
+```scss
+// Direct definition
+.chat-header-actions { ... }
 
-- **0.0.11**
-  - Fixed namespaced Sass variable resolution to bind to the exact token under cursor (prevents `answer.$margin-bottom` / `progress.$margin-bottom` mixups)
+// Nested with & (SCSS nesting)
+.chat { 
+  &-header-actions { ... }
+}
+```
 
-- **0.0.10**
-  - Added go-to-definition + hover link for Sass module variables like `answer.$markdown-title-padding-left`
+Supports:
+- `class="..."`, `className="..."`
+- `:class="..."`, `v-bind:class="..."`
+- `class:foo` (Svelte)
+- Multiple classes: `class="foo bar baz"` (click on specific class)
 
-- **0.0.9**
-  - Fixed hover placeholder detection to ignore `%...` tokens in `//` comments and prefer nested `&...` inference
+## Recent Updates
 
-- **0.0.8**
-  - Fixed hover `@extend` usage matching to avoid prefix matches (e.g. `%chat__sources` no longer matches `%chat__sources--overlay`)
+### Version 0.1.17 (Latest)
 
-- **0.0.7**
-  - Improved hover `@extend` usages to show the enclosing selector/placeholder (container) for each match
+- **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte `<template>` sections to jump to SCSS definitions
+- **SCSS nesting support**: Automatically resolves nested selectors (e.g., `.chat { &-header-actions { ... } }`)
+- **Code quality improvements**: Major refactoring with ~150 lines of duplicate code removed
 
-- **0.0.6**
-  - Added hover to show `@extend %...` usages (QuickPick + jump to location)
+### Version 0.1.16
 
-- **0.0.5**
-  - Fixed placeholder nested lookup for merged selectors like `&__input-dock` (e.g. `%chat { &__input-dock { ... } }`)
+- **Fixed Vue/Svelte file support**: Stable jump-to-definition in `<style lang="scss">` blocks
+- **Multi-root workspace**: Configuration scoping per workspace folder
+- **Performance**: Parallel path resolution and optimized DocumentLink resolution
 
-- **0.0.4**
-  - Added fallback jump for loop/interpolated placeholders (e.g. `%inner-padding-max` → `%inner-padding` or `%inner-padding-#{$k}...`)
-  - Added duplicate-definition handling:
-    - Definition provider returns multiple locations so VS Code can show **Peek Definitions**
-    - `@extend` link click shows QuickPick when multiple matches exist
+---
 
-- **0.0.3**
-  - Added `@extend %...` Cmd/Ctrl+Click jump (direct definition + nested `&` chain support)
-  - Added link-style behavior for `@extend` via `DocumentLinkProvider` (hover underline / pointer + click)
-  - Added OutputChannel logs (`SCSS Alias Jump`) for easier debugging
+**For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**

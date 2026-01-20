@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
 import { readTextFile } from "./fsText";
-import { escapeRegExp } from "./strings";
+import { escapeRegExp, splitLines } from "./strings";
 import { braceDelta, hasBraceSoon, tokenBoundaryOk, firstNonCommentIdx } from "./textScan";
 import { debug as dbg } from "./output";
+import { buildOpenSelectorStack } from "./cssInference";
+import { AMP_SELECTOR_RE, PLACEHOLDER_SELECTOR_RE, EXCLUDE_PATTERN } from "./constants";
 
 function findOpeningBraceLine(
   lines: string[],
@@ -64,7 +66,6 @@ export function inferNestedPlaceholderNameAtLine(lines: string[], lineNo: number
 
   let relDepth = 0;
   const segStack: Array<{ seg: string; depth: number }> = [];
-  const ampRe = /&[A-Za-z0-9_-]+/;
 
   for (let i = base.openLine; i <= lineNo; i++) {
     const line = lines[i] ?? "";
@@ -75,7 +76,7 @@ export function inferNestedPlaceholderNameAtLine(lines: string[], lineNo: number
     }
 
     if (i != base.openLine && depthBefore >= 1) {
-      const m = ampRe.exec(line);
+      const m = AMP_SELECTOR_RE.exec(line);
       if (m) {
         const seg = m[0].slice(1);
         if (line.includes("{")) {
@@ -92,32 +93,13 @@ export function inferNestedPlaceholderNameAtLine(lines: string[], lineNo: number
 }
 
 export function inferPlaceholderNameFromOpenStack(lines: string[], lineNo: number): string | null {
-  let depth = 0;
-  const stack: Array<{ text: string; depth: number; line: number }> = [];
-
-  for (let i = 0; i <= lineNo; i++) {
-    const lineRaw = lines[i] ?? "";
-    const cut = firstNonCommentIdx(lineRaw);
-    const line = lineRaw.slice(0, cut);
-    const depthBefore = depth;
-
-    const braceIdx = line.indexOf("{");
-    if (braceIdx >= 0) {
-      const sel = line.slice(0, braceIdx).trim();
-      if (sel.length > 0) {
-        stack.push({ text: sel, depth: depthBefore + 1, line: i });
-      }
-    }
-
-    depth += braceDelta(lineRaw);
-    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
-  }
+  const stack = buildOpenSelectorStack(lines, lineNo);
 
   let baseIdx = -1;
   let baseName: string | null = null;
   for (let i = stack.length - 1; i >= 0; i--) {
     const t = stack[i]?.text ?? "";
-    const m = /%([A-Za-z0-9_-]+)/.exec(t);
+    const m = PLACEHOLDER_SELECTOR_RE.exec(t);
     if (m) {
       baseIdx = i;
       baseName = m[1];
@@ -126,11 +108,10 @@ export function inferPlaceholderNameFromOpenStack(lines: string[], lineNo: numbe
   }
   if (!baseName) return null;
 
-  const ampRe = /&[A-Za-z0-9_-]+/;
   const suffixParts: string[] = [];
   for (let i = baseIdx + 1; i < stack.length; i++) {
     const t = stack[i]?.text ?? "";
-    const m = ampRe.exec(t);
+    const m = AMP_SELECTOR_RE.exec(t);
     if (m) suffixParts.push(m[0].slice(1));
   }
 
@@ -317,7 +298,7 @@ export async function findPlaceholderDefinitions(
     const cached = filesCache.get(key);
     if (cached) return cached;
     const pattern = new vscode.RelativePattern(folder, "**/*.{scss,sass}");
-    const files = await vscode.workspace.findFiles(pattern, "**/{node_modules,dist,build}/**");
+    const files = await vscode.workspace.findFiles(pattern, EXCLUDE_PATTERN);
     filesCache.set(key, files);
     return files;
   };
@@ -343,7 +324,7 @@ export async function findPlaceholderDefinitions(
       const text = await getText(file);
       if (!text || !text.includes(token)) continue;
 
-      const lines = text.split(/\r?\n/);
+      const lines = splitLines(text);
       for (let i = 0; i < lines.length; i++) {
         const direct = findDirectPlaceholderDefinitionOnLine(lines, i, token);
         if (!direct) continue;
@@ -362,7 +343,7 @@ export async function findPlaceholderDefinitions(
       if (!text) continue;
       if (!prefixes.some((p) => text.includes(`%${p.prefix}`))) continue;
 
-      const lines = text.split(/\r?\n/);
+      const lines = splitLines(text);
       for (const pref of prefixes) {
         const baseToken = `%${pref.prefix}`;
         for (let i = 0; i < lines.length; i++) {
@@ -400,7 +381,7 @@ export async function findPlaceholderDefinitions(
         for (const file of files) {
           const text = await getText(file);
           if (!text || !text.includes(baseToken)) continue;
-          const lines = text.split(/\r?\n/);
+          const lines = splitLines(text);
           for (let i = 0; i < lines.length; i++) {
             const direct = findDirectPlaceholderDefinitionOnLine(lines, i, baseToken);
             if (!direct) continue;
@@ -423,7 +404,7 @@ export async function findPlaceholderDefinitions(
         for (const file of files) {
           const text = await getText(file);
           if (!text || !re.test(text)) continue;
-          const lines = text.split(/\r?\n/);
+          const lines = splitLines(text);
           for (let i = 0; i < lines.length; i++) {
             const line = lines[i] ?? "";
             const m = line.match(re);

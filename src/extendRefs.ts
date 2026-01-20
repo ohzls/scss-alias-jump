@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { readTextFile } from "./fsText";
-import { braceDelta, firstNonCommentIdx } from "./textScan";
-import { escapeRegExp } from "./strings";
+import { braceDelta, stripComments, pruneStack } from "./textScan";
+import { escapeRegExp, splitLines } from "./strings";
+import { EXCLUDE_PATTERN, MAX_SEARCH_RESULTS, CACHE_TTL_MS } from "./constants";
 
 export type ExtendRef = {
   uri: vscode.Uri;
@@ -30,11 +31,10 @@ function scanExtendRefsInText(uri: vscode.Uri, text: string, placeholderName: st
   let depth = 0;
   const stack: Array<{ text: string; depth: number; line: number }> = [];
 
-  const lines = text.split(/\r?\n/);
+  const lines = splitLines(text);
   for (let i = 0; i < lines.length; i++) {
     const lineRaw = lines[i] ?? "";
-    const cut = firstNonCommentIdx(lineRaw);
-    const line = lineRaw.slice(0, cut);
+    const line = stripComments(lineRaw);
     const depthBefore = depth;
 
     if (line.includes("@extend") && line.includes(token)) {
@@ -60,8 +60,8 @@ function scanExtendRefsInText(uri: vscode.Uri, text: string, placeholderName: st
     }
 
     depth += braceDelta(lineRaw);
-    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
-    if (refs.length >= 200) break;
+    pruneStack(stack, depth);
+    if (refs.length >= MAX_SEARCH_RESULTS) break;
   }
 
   return refs;
@@ -71,11 +71,11 @@ export async function findExtendReferences(placeholderName: string): Promise<Ext
   const key = placeholderName;
   const cached = extendRefsCache2.get(key);
   const now = Date.now();
-  if (cached && now - cached.ts < 1500) return cached.refs;
+  if (cached && now - cached.ts < CACHE_TTL_MS) return cached.refs;
 
   const files = await vscode.workspace.findFiles(
     "**/*.{scss,sass}",
-    "**/{node_modules,dist,build}/**"
+    EXCLUDE_PATTERN
   );
 
   const refs: ExtendRef[] = [];
@@ -88,9 +88,9 @@ export async function findExtendReferences(placeholderName: string): Promise<Ext
     const found = scanExtendRefsInText(file, text, placeholderName);
     for (const r of found) {
       refs.push(r);
-      if (refs.length >= 200) break;
+      if (refs.length >= MAX_SEARCH_RESULTS) break;
     }
-    if (refs.length >= 200) break;
+    if (refs.length >= MAX_SEARCH_RESULTS) break;
   }
 
   extendRefsCache2.set(key, { ts: now, refs });

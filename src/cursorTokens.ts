@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { USE_FORWARD_IMPORT_RE } from "./constants";
 import { ensureNoExt } from "./sassResolve";
+import { splitLines } from "./strings";
 
 export function getPlaceholderNameUnderCursor(
   document: vscode.TextDocument,
@@ -80,7 +81,7 @@ export function deriveDefaultNamespace(importPath: string) {
 
 export function parseUseNamespaceMap(text: string): Map<string, string> {
   const map = new Map<string, string>();
-  const lines = text.split(/\r?\n/);
+  const lines = splitLines(text);
   const re = /@use\s+(['"])([^'"]+)\1(?:\s+as\s+([A-Za-z0-9_-]+|\*))?/;
 
   for (const raw of lines) {
@@ -112,4 +113,55 @@ export function getCssClassUnderCursor(
   const t = document.getText(range);
   if (!t.startsWith(".") || t.length <= 1) return null;
   return { className: t.slice(1), range };
+}
+
+/**
+ * Extract class name from template class attribute (Vue/Svelte)
+ * Supports: class="foo", className="foo", :class="foo", v-bind:class="foo", class:foo
+ */
+export function getClassNameUnderCursor(line: string, character: number): string | null {
+  // Patterns for class attributes
+  const patterns = [
+    /(?:class|className)\s*=\s*["']([^"']+)["']/g,
+    /:class\s*=\s*["']([^"']+)["']/g,
+    /v-bind:class\s*=\s*["']([^"']+)["']/g,
+    /class:([A-Za-z0-9_-]+)/g,
+  ];
+
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    
+    while ((match = pattern.exec(line))) {
+      const fullMatch = match[0];
+      const classValue = match[1];
+      const matchStart = match.index;
+      const matchEnd = matchStart + fullMatch.length;
+
+      // Check if cursor is within this match
+      if (character >= matchStart && character <= matchEnd) {
+        // If the class value contains multiple classes, find which one is under cursor
+        if (classValue.includes(" ")) {
+          const classes = classValue.split(/\s+/);
+          const valueStart = matchStart + fullMatch.indexOf(classValue);
+          
+          let offset = valueStart;
+          for (const cls of classes) {
+            const clsStart = offset;
+            const clsEnd = offset + cls.length;
+            
+            if (character >= clsStart && character <= clsEnd && cls.trim()) {
+              return cls.trim();
+            }
+            
+            offset = clsEnd + 1; // +1 for space
+          }
+        } else if (classValue.trim()) {
+          return classValue.trim();
+        }
+      }
+    }
+  }
+
+  return null;
 }

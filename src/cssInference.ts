@@ -1,6 +1,7 @@
-import { braceDelta, firstNonCommentIdx } from "./textScan";
+import { braceDelta, stripComments, pruneStack } from "./textScan";
+import { AMP_SELECTOR_RE, CLASS_SELECTOR_RE } from "./constants";
 
-function buildOpenSelectorStack(
+export function buildOpenSelectorStack(
   lines: string[],
   lineNo: number
 ): Array<{ text: string; depth: number; line: number }> {
@@ -9,8 +10,7 @@ function buildOpenSelectorStack(
 
   for (let i = 0; i <= lineNo; i++) {
     const raw = lines[i] ?? "";
-    const cut = firstNonCommentIdx(raw);
-    const line = raw.slice(0, cut);
+    const line = stripComments(raw);
     const depthBefore = depth;
 
     const braceIdx = line.indexOf("{");
@@ -22,7 +22,7 @@ function buildOpenSelectorStack(
     }
 
     depth += braceDelta(raw);
-    while (stack.length > 0 && stack[stack.length - 1].depth > depth) stack.pop();
+    pruneStack(stack, depth);
   }
 
   return stack;
@@ -30,14 +30,12 @@ function buildOpenSelectorStack(
 
 export function inferCssClassNameAtLine(lines: string[], lineNo: number): string | null {
   const stack = buildOpenSelectorStack(lines, lineNo);
-  const classRe = /\.([A-Za-z0-9_-]+)/;
-  const ampRe = /&[A-Za-z0-9_-]+/;
 
   let baseIdx = -1;
   let baseClass: string | null = null;
   for (let i = stack.length - 1; i >= 0; i--) {
     const t = stack[i]?.text ?? "";
-    const m = classRe.exec(t);
+    const m = CLASS_SELECTOR_RE.exec(t);
     if (m) {
       baseIdx = i;
       baseClass = m[1];
@@ -49,7 +47,7 @@ export function inferCssClassNameAtLine(lines: string[], lineNo: number): string
   let outName = baseClass;
   for (let i = baseIdx + 1; i < stack.length; i++) {
     const t = stack[i]?.text ?? "";
-    const m = ampRe.exec(t);
+    const m = AMP_SELECTOR_RE.exec(t);
     if (!m) continue;
     const seg = m[0].slice(1);
     if (!/^[A-Za-z0-9_-]+$/.test(seg)) continue;

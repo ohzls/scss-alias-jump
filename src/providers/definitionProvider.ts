@@ -8,10 +8,12 @@ import {
   getImportPathUnderCursorOnLine,
   getNamespacedVarRefUnderCursor,
   parseUseNamespaceMap,
+  getClassNameUnderCursor,
 } from "../cursorTokens";
 import { findPlaceholderDefinitions } from "../placeholders";
 import { findVariableDefinitionInModule, resolveSassModuleFromUse } from "../sassModule";
 import { debug as dbg } from "../output";
+import { findClassDefinitionInDocument, findClassDefinitionInWorkspace } from "../classUsage";
 
 export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private out: vscode.OutputChannel) {}
@@ -41,7 +43,43 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
 
     const line = document.lineAt(position.line).text;
 
-    // 0) namespace.$var jump
+    // 0) Template class attribute jump (Vue/Svelte)
+    if (document.languageId === "vue" || document.languageId === "svelte") {
+      const classMatch = getClassNameUnderCursor(line, position.character);
+      if (classMatch) {
+        if (debug) {
+          dbg(
+            this.out,
+            `[class] Vue/Svelte template class="${classMatch}" at line ${position.line + 1}`,
+            document.uri
+          );
+        }
+
+        // First, try to find in the same document (for SFC with <style> block)
+        const localDef = await findClassDefinitionInDocument(classMatch, document);
+        if (localDef) {
+          if (debug) dbg(this.out, `[hit] class "${classMatch}" found in same document`, document.uri);
+          return localDef;
+        }
+
+        // Then search in workspace
+        const workspaceDefs = await findClassDefinitionInWorkspace(classMatch);
+        if (workspaceDefs.length > 0) {
+          if (debug) {
+            dbg(
+              this.out,
+              `[hit] class "${classMatch}" found in workspace (${workspaceDefs.length} locations)`,
+              document.uri
+            );
+          }
+          return workspaceDefs.length === 1 ? workspaceDefs[0] : workspaceDefs;
+        }
+
+        if (debug) dbg(this.out, `[miss] class "${classMatch}" not found`, document.uri);
+      }
+    }
+
+    // 1) namespace.$var jump
     const varRef = getNamespacedVarRefUnderCursor(document, position);
     if (varRef) {
       if (token.isCancellationRequested) return null;

@@ -26,6 +26,7 @@ import { findClassUsages } from "./classUsage";
 import { info } from "./output";
 import { ScssAliasDocumentLinkProvider } from "./providers/documentLinkProvider";
 import { ScssAliasDefinitionProvider } from "./providers/definitionProvider";
+import { splitLines, formatFileLocation } from "./strings";
 
 export function registerCommands(context: vscode.ExtensionContext, out: vscode.OutputChannel) {
   context.subscriptions.push(
@@ -49,7 +50,7 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
               ? locs[0]
               : await (async () => {
                   const items = locs.map((l) => ({
-                    label: `${path.basename(l.uri.fsPath)}:${l.range.start.line + 1}`,
+                    label: formatFileLocation(l.uri, l.range.start.line),
                     description: l.uri.fsPath,
                     loc: l,
                   }));
@@ -87,7 +88,7 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           }
 
           const items = refs.map((r) => ({
-            label: `${r.containerText ? `${r.containerText} — ` : ""}${path.basename(r.uri.fsPath)}:${r.pos.line + 1}`,
+            label: `${r.containerText ? `${r.containerText} — ` : ""}${formatFileLocation(r.uri, r.pos.line)}`,
             description: r.uri.fsPath,
             loc: new vscode.Location(r.uri, r.pos),
           }));
@@ -125,7 +126,7 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           }
 
           const items = refs.map((r) => ({
-            label: `${path.basename(r.uri.fsPath)}:${r.pos.line + 1}`,
+            label: formatFileLocation(r.uri, r.pos.line),
             description: r.uri.fsPath,
             loc: new vscode.Location(r.uri, r.pos),
           }));
@@ -188,7 +189,7 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
         }
 
         const aliases = getAliases(doc.uri);
-        const lines = doc.getText().split(/\r?\n/);
+        const lines = splitLines(doc.getText());
         let n = 0;
         info(out, `[scan] from=${docFsPath} uri=${doc.uri.scheme}`);
 

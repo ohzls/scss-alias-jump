@@ -39,3 +39,20 @@ export function hasBraceSoon(lines: string[], fromLine: number, tokenEndCh: numb
 
   return false;
 }
+
+/**
+ * Remove comments from a line (everything after //)
+ */
+export function stripComments(line: string): string {
+  const idx = firstNonCommentIdx(line);
+  return line.slice(0, idx);
+}
+
+/**
+ * Update depth stack by removing entries that are deeper than current depth
+ */
+export function pruneStack<T extends { depth: number }>(stack: T[], currentDepth: number): void {
+  while (stack.length > 0 && stack[stack.length - 1].depth > currentDepth) {
+    stack.pop();
+  }
+}
