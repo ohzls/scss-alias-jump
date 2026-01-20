@@ -118,14 +118,16 @@ export function getCssClassUnderCursor(
 /**
  * Extract class name from template class attribute (Vue/Svelte)
  * Supports: class="foo", className="foo", :class="foo", v-bind:class="foo", class:foo
+ * Also supports: class={foo} (Svelte), class={"foo"} (Svelte)
  */
 export function getClassNameUnderCursor(line: string, character: number): string | null {
   // Patterns for class attributes
   const patterns = [
-    /(?:class|className)\s*=\s*["']([^"']+)["']/g,
-    /:class\s*=\s*["']([^"']+)["']/g,
-    /v-bind:class\s*=\s*["']([^"']+)["']/g,
-    /class:([A-Za-z0-9_-]+)/g,
+    /(?:class|className)\s*=\s*["']([^"']+)["']/g,        // class="foo"
+    /(?:class|className)\s*=\s*\{["']([^"']+)["']\}/g,    // class={"foo"} (Svelte)
+    /:class\s*=\s*["']([^"']+)["']/g,                     // :class="foo" (Vue)
+    /v-bind:class\s*=\s*["']([^"']+)["']/g,               // v-bind:class="foo" (Vue)
+    /class:([A-Za-z0-9_-]+)/g,                            // class:foo (Svelte)
   ];
 
   for (const pattern of patterns) {
