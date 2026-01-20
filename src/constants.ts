@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 // Keep in sync with package.json version for debugging.
-export const EXT_VERSION = "0.1.17";
+export const EXT_VERSION = "0.3.0";
 
 export const OUTPUT_CHANNEL_NAME = "SCSS Alias Jump";
 
@@ -37,6 +37,11 @@ export const DEFINITION_SELECTOR: vscode.DocumentSelector = [
   // SFC support (Vue/Svelte style blocks are often embedded in a `vue`/`svelte` document)
   { language: "vue" },
   { language: "svelte" },
+  // React/TypeScript for CSS Modules jump (styles.xxx → .xxx)
+  { language: "typescript" },
+  { language: "typescriptreact" },
+  { language: "javascript" },
+  { language: "javascriptreact" },
 ];
 
 export const DOCUMENT_LINK_SELECTOR: vscode.DocumentSelector = [

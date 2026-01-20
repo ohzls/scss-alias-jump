@@ -8,8 +8,12 @@ VS Code extension that enables Cmd/Ctrl+Click (Go to Definition) for SCSS/Sass `
 
 - **`@use`/`@forward`/`@import` path jump**: Cmd/Ctrl+Click on import paths with alias prefixes
 - **`@extend %placeholder` jump**: Jump to placeholder definitions, including nested structures
-- **Template class jump (NEW)**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
-- **SCSS nesting support (NEW)**: Automatically resolves nested selectors like `.chat { &-header-actions { ... } }`
+- **Bidirectional CSS Modules jump (NEW)**:
+  - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
+  - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` usages
+- **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
+- **SCSS nesting support**: Automatically resolves nested selectors like `.chat { &-header-actions { ... } }`
+- **SCSS interpolation support**: Handles `#{$variable}` patterns in selectors
 - **Hover for usages**: Hover on placeholders or class selectors to see usage locations
 - **Sass module variables**: Jump to namespaced variable definitions like `answer.$padding`
 
@@ -71,9 +75,41 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 - `_path.scss` / `_path.sass` / `_path.css`
 - `path/index.scss` / `path/_index.scss` (and `.sass`/`.css`)
 
+### CSS Modules (React/TypeScript/Vue)
+
+**NEW in 0.1.17**: Bidirectional jump between TypeScript and SCSS!
+
+**TypeScript → SCSS:**
+```tsx
+import styles from './ChatInput.module.scss'
+
+<div className={styles.fileItem}>  // Cmd+Click anywhere on "styles.fileItem"
+```
+→ Jumps to `.fileItem` in `ChatInput.module.scss`
+
+**SCSS → TypeScript (Reverse Jump):**
+```scss
+.fileItem {  // Cmd+Click on ".fileItem" or "&Item"
+  padding: 1em;
+}
+
+// Also works with nesting and interpolation:
+#{$aux} {    // $aux: '.aux'
+  &Menu {    // Cmd+Click → finds styles.auxMenu usages
+    ...
+  }
+}
+```
+→ Shows QuickPick list of all `styles.fileItem` or `styles.auxMenu` usages
+
+**Supports:**
+- Import patterns: `import styles from './X.module.scss'` or `import styles from './X.module'`
+- SCSS interpolation: `#{$variable}` in selectors
+- Nested selectors: `#{$aux} { &Menu { ... } }` → `auxMenu`
+
 ### Template Class Jump (Vue/Svelte)
 
-**NEW in 0.1.17**: Jump from template class attributes to SCSS definitions!
+Jump from template class attributes to SCSS definitions!
 
 In Vue/Svelte templates:
 ```vue
@@ -103,18 +139,22 @@ Supports:
 
 ## Recent Updates
 
-### Version 0.1.17 (Latest)
+### Version 0.3.0 (Latest)
 
-- **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte `<template>` sections to jump to SCSS definitions
+- **Bidirectional CSS Modules jump**: 
+  - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
+  - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` usages
+- **SCSS interpolation support**: `#{$variable}` in selectors with full nesting support
+- **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
 - **SCSS nesting support**: Automatically resolves nested selectors (e.g., `.chat { &-header-actions { ... } }`)
 - **Code quality improvements**: Major refactoring with ~150 lines of duplicate code removed
-
-### Version 0.1.16
-
-- **Fixed Vue/Svelte file support**: Stable jump-to-definition in `<style lang="scss">` blocks
-- **Multi-root workspace**: Configuration scoping per workspace folder
-- **Performance**: Parallel path resolution and optimized DocumentLink resolution
 
 ---
 
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
+
+### History
+
+- **0.3.0**
+  - (fill)
+

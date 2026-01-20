@@ -35,6 +35,53 @@ export function getAmpSegmentUnderCursor(
   return null;
 }
 
+/**
+ * Check if cursor is on & selector (returns full token including &)
+ */
+export function isOnAmpSelector(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): boolean {
+  return getAmpSegmentUnderCursor(document, position) !== null;
+}
+
+/**
+ * Extract CSS Module class reference (styles.className or $style.className)
+ * Returns className and the import variable name
+ */
+export function getCssModuleClassUnderCursor(
+  document: vscode.TextDocument,
+  position: vscode.Position
+): { className: string; importVar: string } | null {
+  const lineText = document.lineAt(position.line).text;
+  
+  // Match styles.className or $style.className
+  const patterns = [
+    /\b(styles)\s*\.\s*([A-Za-z0-9_-]+)/g,
+    /\$([a-zA-Z0-9_]+)\s*\.\s*([A-Za-z0-9_-]+)/g,
+  ];
+  
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    
+    while ((match = pattern.exec(lineText))) {
+      const importVar = match[1];
+      const className = match[2];
+      const matchStart = match.index;
+      const matchEnd = matchStart + match[0].length;
+      
+      // Allow cursor anywhere in the match (styles.fileItem)
+      // User can click on 'styles', '.', or 'fileItem' - all should work
+      if (position.character >= matchStart && position.character <= matchEnd) {
+        return { className, importVar };
+      }
+    }
+  }
+  
+  return null;
+}
+
 export function getNamespacedVarRefUnderCursor(
   document: vscode.TextDocument,
   position: vscode.Position

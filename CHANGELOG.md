@@ -5,20 +5,35 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.17] - 2026-01-20
+## [0.3.0] - 2026-01-20
 
 ### Added
+- **Bidirectional CSS Modules jump** (React/TypeScript/Next.js):
+  - **Forward jump**: Cmd/Click on `styles.fileItem` in TSX/JSX to jump to `.fileItem` definition in SCSS
+  - **Reverse jump**: Cmd/Click on `.fileItem` or `&Item` in SCSS to find all `styles.fileItem` usages in code
+  - Supports import patterns with or without extensions: `import styles from './X.module.scss'` or `'./X.module'`
+  - Works with namespaced imports: `import * as styles from '...'`
+- **SCSS interpolation support**: Full support for `#{$variable}` in selectors
+  - Parses SCSS variables: `$aux: '.aux';`
+  - Resolves interpolation: `#{$aux} { &Menu { ... } }` → `.auxMenu`
+  - Finds usages: Cmd/Click on `#{$aux}` or `&Menu` → finds `styles.auxMenu` in React/Vue files
+  - Skips interpolation braces when parsing block structure
 - **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte `<template>` sections to jump to SCSS definitions
   - Supports `class="..."`, `className="..."`, `:class="..."`, `v-bind:class="..."`, `class:foo`
   - Handles multiple classes in one attribute
+  - Also supports Svelte dynamic classes: `class={"foo"}`
 - **SCSS nesting support**: Automatically resolves nested selectors (e.g., `.chat { &-header-actions { ... } }`)
   - Works for both template class jumps and placeholder definitions
   - Supports BEM patterns with `&__element` and `&--modifier`
+  - Integrates with interpolation for complex nested structures
 
 ### Changed
+- **Extended language support**: Added TypeScript, JavaScript, React, and JSX to Definition Provider selector
+- **Improved selector parsing**: Enhanced `buildOpenSelectorStack` to skip interpolation braces `#{...}` when finding block opening braces
+- **Smarter cursor detection**: CSS Module class extraction now works when clicking anywhere on `styles.className`
 - **Major code refactoring** for improved maintainability:
   - Extracted common patterns into reusable utilities (`splitLines`, `stripComments`, `pruneStack`, `formatFileLocation`, etc.)
-  - Unified regular expression patterns into constants
+  - Unified regular expression patterns into constants (`AMP_SELECTOR_RE`, `CLASS_SELECTOR_RE`, `PLACEHOLDER_SELECTOR_RE`)
   - Centralized performance limits (cache TTL, search limits, timeouts)
   - Removed ~150 lines of duplicate code across multiple files
   - Reused existing `buildOpenSelectorStack` for placeholder name inference
@@ -29,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consistent text processing and UI formatting across all components
 - More maintainable codebase with shared utilities
 - Uniform display of file locations in QuickPick, hover tooltips, and error messages
+- Enhanced hover provider to support SCSS interpolation in class name inference
+
+### Fixed
+- Fixed interpolation brace detection: `#{$aux} {` now correctly parses as `.aux` instead of `#`
+- CSS Module usages now include both direct class attributes and CSS Modules patterns (`styles.xxx`)
+- Variable parsing now handles malformed values gracefully
 
 ## [0.1.16] - 2026-01-19
 

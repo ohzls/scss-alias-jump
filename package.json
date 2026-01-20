@@ -2,8 +2,8 @@
   "name": "scss-alias-jump",
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
-  "description": "Cmd/Ctrl+Click jump-to-definition for SCSS/Sass @use/@forward/@import paths using workspace-defined aliases. Jump from Vue/Svelte template classes to SCSS definitions.",
-  "version": "0.1.17",
+  "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
+  "version": "0.3.0",
   "license": "MIT",
   "private": false,
   "engines": {
@@ -13,7 +13,9 @@
     "type": "git",
     "url": "https://github.com/ohzls/scss-alias-jump"
   },
-  "categories": ["Programming Languages"],
+  "categories": [
+    "Programming Languages"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],

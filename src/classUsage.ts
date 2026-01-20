@@ -28,7 +28,9 @@ function lineHasClassUsageSignal(line: string) {
     line.includes("v-bind:class") ||
     line.includes("class:") ||
     line.includes("clsx(") ||
-    line.includes("classnames(")
+    line.includes("classnames(") ||
+    line.includes("styles.") ||      // CSS Modules (React/Vue)
+    line.includes("$style.")          // CSS Modules (Vue)
   );
 }
 
@@ -58,6 +60,33 @@ export async function findClassUsages(className: string): Promise<ClassUsage[]> 
       if (!line.includes(token)) continue;
       if (!lineHasClassUsageSignal(line)) continue;
 
+      // First check for CSS Modules usage (styles.mainMenu or $style.mainMenu)
+      const cssModulesPatterns = [
+        // styles.mainMenu - React/Next.js CSS Modules
+        new RegExp(`\\bstyles\\.${escapeRegExp(token)}(?![A-Za-z0-9_])`, 'g'),
+        // $style.mainMenu - Vue CSS Modules
+        new RegExp(`\\$style\\.${escapeRegExp(token)}(?![A-Za-z0-9_])`, 'g'),
+      ];
+      
+      let foundCssModules = false;
+      for (const pattern of cssModulesPatterns) {
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(line))) {
+          const dotIdx = match.index + match[0].indexOf('.');
+          refs.push({
+            uri: file,
+            pos: new vscode.Position(i, dotIdx + 1), // +1 to skip the dot
+            hint: fileHintFromPath(file),
+          });
+          foundCssModules = true;
+          if (refs.length >= MAX_SEARCH_RESULTS) break;
+        }
+        if (refs.length >= MAX_SEARCH_RESULTS) break;
+      }
+
+      // Then check for regular class usage (class="mainMenu") only if not CSS Modules
+      if (!foundCssModules) {
       let from = 0;
       while (true) {
         const idx = line.indexOf(token, from);
@@ -70,14 +99,77 @@ export async function findClassUsages(className: string): Promise<ClassUsage[]> 
           pos: new vscode.Position(i, idx),
           hint: fileHintFromPath(file),
         });
-        if (refs.length >= MAX_SEARCH_RESULTS) break;
+          if (refs.length >= MAX_SEARCH_RESULTS) break;
+        }
       }
+
       if (refs.length >= MAX_SEARCH_RESULTS) break;
     }
     if (refs.length >= MAX_SEARCH_RESULTS) break;
   }
 
   classUsageCache.set(key, { ts: now, refs });
+  return refs;
+}
+
+/**
+ * Find class usages that start with a given prefix
+ * Useful for SCSS interpolation blocks: #{$aux} { &Menu, &Item, etc. }
+ */
+export async function findClassUsagesByPrefix(classPrefix: string): Promise<ClassUsage[]> {
+  const refs: ClassUsage[] = [];
+
+  const files = await vscode.workspace.findFiles(
+    "**/*.{ts,tsx,js,jsx,vue,svelte,html}",
+    EXCLUDE_PATTERN
+  );
+
+  for (const file of files) {
+    const text = await readTextFile(file);
+    if (!text) continue;
+
+    const lines = splitLines(text);
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i] ?? "";
+      const line = stripComments(raw);
+      if (!lineHasClassUsageSignal(line)) continue;
+
+      // Check for CSS Modules usage (styles.auxMenu, styles.auxItem, etc.)
+      const cssModulesPattern = new RegExp(`\\bstyles\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, 'g');
+      cssModulesPattern.lastIndex = 0;
+      
+      let match: RegExpExecArray | null;
+      while ((match = cssModulesPattern.exec(line))) {
+        const fullClassName = match[1]; // auxMenu, auxItem, etc.
+        const dotIdx = match.index + match[0].indexOf('.');
+        refs.push({
+          uri: file,
+          pos: new vscode.Position(i, dotIdx + 1),
+          hint: `${fileHintFromPath(file)} (${fullClassName})`,
+        });
+        if (refs.length >= MAX_SEARCH_RESULTS) break;
+      }
+
+      // Also check for $style (Vue)
+      const vueModulesPattern = new RegExp(`\\$style\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, 'g');
+      vueModulesPattern.lastIndex = 0;
+      
+      while ((match = vueModulesPattern.exec(line))) {
+        const fullClassName = match[1];
+        const dotIdx = match.index + match[0].indexOf('.');
+        refs.push({
+          uri: file,
+          pos: new vscode.Position(i, dotIdx + 1),
+          hint: `${fileHintFromPath(file)} (${fullClassName})`,
+        });
+        if (refs.length >= MAX_SEARCH_RESULTS) break;
+      }
+
+      if (refs.length >= MAX_SEARCH_RESULTS) break;
+    }
+    if (refs.length >= MAX_SEARCH_RESULTS) break;
+  }
+
   return refs;
 }
 

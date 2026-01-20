@@ -5,6 +5,7 @@ import { getDocFsPath } from "../docPath";
 import { withTimeout } from "../async";
 import { isHoverWorkspaceScanEnabled } from "../settings";
 import { splitLines, formatFileLocation } from "../strings";
+import { parseScssVariables } from "../scssVariables";
 import {
   getAmpSegmentUnderCursor,
   getCssClassUnderCursor,
@@ -64,13 +65,15 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
       }
     }
 
-    const lines = splitLines(document.getText());
+    const text = document.getText();
+    const lines = splitLines(text);
+    const variables = parseScssVariables(text);
 
     // CSS class usage hover
     {
       const directClass = getCssClassUnderCursor(document, position);
       const amp = getAmpSegmentUnderCursor(document, position);
-      const inferred = amp ? inferCssClassNameAtLine(lines, position.line) : null;
+      const inferred = amp ? inferCssClassNameAtLine(lines, position.line, variables) : null;
       const className = directClass?.className ?? inferred;
 
       if (className) {
