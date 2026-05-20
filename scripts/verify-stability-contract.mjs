@@ -39,9 +39,13 @@ function verifyAliasResolutionFallback() {
     const doc = `${workspaceRoot}/src/assets/css/scss/components/_popoverMenu.scss`;
     const uri = { fsPath: doc, toString: () => `file://${doc}` };
     const fallback = resolveAliasToAbsolute('@/assets/css/scss/components/button', doc, {}, uri);
+    const scssFallback = resolveAliasToAbsolute('@scss/_base/__reset', doc, {}, uri);
     const configured = resolveAliasToAbsolute('@/x', doc, { '@': '/custom/src' }, uri);
+    const configuredScss = resolveAliasToAbsolute('@scss/_base/__reset', doc, { '@scss': '/custom/scss' }, uri);
     check('implicit @ alias resolves to workspace src', fallback === `${workspaceRoot}/src/assets/css/scss/components/button`, fallback ?? 'null');
+    check('implicit @scss alias resolves to workspace vendor SCSS', scssFallback === `${workspaceRoot}/vendor/_assets/scss/_base/__reset`, scssFallback ?? 'null');
     check('explicit @ alias remains authoritative', configured === '/custom/src/x', configured ?? 'null');
+    check('explicit @scss alias remains authoritative', configuredScss === '/custom/scss/_base/__reset', configuredScss ?? 'null');
   } finally {
     Module._load = originalLoad;
   }
@@ -55,6 +59,10 @@ function check(name, condition, detail) {
 verifyAliasResolutionFallback();
 
 const pkg = JSON.parse(read('package.json'));
+const constants = read('src/constants.ts');
+const versionMatch = constants.match(/EXT_VERSION\s*=\s*"([^"]+)"/);
+check('EXT_VERSION matches package version', versionMatch?.[1] === pkg.version, versionMatch?.[1] ?? 'missing');
+
 const activation = new Set(pkg.activationEvents ?? []);
 for (const event of [
   'onStartupFinished',

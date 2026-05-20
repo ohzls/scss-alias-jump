@@ -5,6 +5,14 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-05-20
+
+### Fixed
+- Fixed `@use '@scss/...'` links in workspaces without explicit `scssAliasJump.aliases` by falling back to the current workspace `vendor/_assets/scss` folder.
+
+### Improved
+- Added a stability guard that verifies implicit `@scss` fallback resolution and keeps `EXT_VERSION` aligned with `package.json`.
+
 ## [0.3.1] - 2026-05-20
 
 ### Fixed

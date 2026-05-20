@@ -119,6 +119,13 @@ export function resolveAliasToAbsolute(
     return path.resolve(wsFsPath, "src", rest);
   }
 
+  // Common vendored SCSS convention used by Vite projects: @scss/ points at
+  // the current workspace's vendored shared SCSS root.
+  if ((p === "@scss" || p.startsWith("@scss/")) && wsFsPath) {
+    const rest = p === "@scss" ? "" : p.slice("@scss/".length);
+    return path.resolve(wsFsPath, "vendor", "_assets", "scss", rest);
+  }
+
   if (p.startsWith(".")) {
     return path.resolve(path.dirname(docFsPath), p);
   }

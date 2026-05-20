@@ -37,7 +37,7 @@ Add aliases in your workspace/user settings:
 
 **Configuration options:**
 
-- **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces. If no explicit alias matches, `@/…` falls back to `${workspaceFolder}/src/…` for the current document's workspace folder.
+- **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces. If no explicit alias matches, `@/…` falls back to `${workspaceFolder}/src/…`, and `@scss/…` falls back to `${workspaceFolder}/vendor/_assets/scss/…` for the current document's workspace folder.
 - **`scssAliasJump.debugLogging`**: Enable verbose debug logging to Output panel (default: `false`).
 - **`scssAliasJump.hoverWorkspaceScan`**: Enable workspace-wide scans for hover features (class usages / `@extend` references). **Default: `true`**. Disable if experiencing delays in very large projects.
 - **`scssAliasJump.scanExclude`**: Additional generated-folder globs to skip during workspace scans. Defaults include `.svelte-kit`, `.next`, `dist-public`, `.turbo`, and `.cache`.
@@ -86,7 +86,7 @@ Workspace scans used by hover, template class jumps, CSS Modules reverse jumps, 
 
 ### How it resolves paths
 
-Given an absolute base path (after alias/relative expansion) it tries common Sass resolution candidates. Explicit aliases win; otherwise the common `@/` convention resolves to the current workspace folder's `src` directory:
+Given an absolute base path (after alias/relative expansion) it tries common Sass resolution candidates. Explicit aliases win; otherwise common project conventions are resolved relative to the current document's workspace folder: `@/…` → `src/…`, and `@scss/…` → `vendor/_assets/scss/…`.
 
 - `path.scss` / `path.sass` / `path.css`
 - `_path.scss` / `_path.sass` / `_path.css`
@@ -207,8 +207,9 @@ GitHub Actions:
 
 ## Recent Updates
 
-### Version 0.3.0 (Latest)
+### Version 0.3.2 (Latest)
 
+- **Implicit `@scss/...` fallback**: vendored shared SCSS roots resolve to `${workspaceFolder}/vendor/_assets/scss/...` when no explicit alias is configured.
 - **Bidirectional CSS Modules jump**: 
   - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
   - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` usages
@@ -223,6 +224,9 @@ GitHub Actions:
 
 ### History
 
+- **0.3.2**
+  - Fixed `@scss/...` Sass links for vendored shared SCSS roots such as `vendor/_assets/scss`.
+
 - **0.3.1**
   - Stabilized large-workspace scans, fixed `@/` Sass link fallback, and added verified Cursor VSIX bundling.
 
@@ -233,4 +237,3 @@ GitHub Actions:
 
 - **0.3.0**
   - (fill)
-

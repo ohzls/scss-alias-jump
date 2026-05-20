@@ -3,7 +3,7 @@
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "private": false,
   "engines": {
@@ -64,7 +64,7 @@
         "scssAliasJump.aliases": {
           "type": "object",
           "default": {},
-          "markdownDescription": "Map import aliases to absolute paths (can use VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}`). Example: `{ \"@\": \"${workspaceFolder:nlrc}/src\", \"@scss\": \"${workspaceFolder:_assets}/scss\" }`",
+          "markdownDescription": "Map import aliases to absolute paths (can use VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}`). Explicit aliases win. Without an explicit match, `@/…` falls back to `${workspaceFolder}/src/…` and `@scss/…` falls back to `${workspaceFolder}/vendor/_assets/scss/…`. Example: `{ \"@\": \"${workspaceFolder:nlrc}/src\", \"@scss\": \"${workspaceFolder:_assets}/scss\" }`",
           "additionalProperties": {
             "type": "string"
           }
