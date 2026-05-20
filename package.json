@@ -3,7 +3,7 @@
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "license": "MIT",
   "private": false,
   "engines": {
@@ -29,7 +29,8 @@
     "onLanguage:javascriptreact",
     "onCommand:scss-alias-jump.debugScanImports",
     "onCommand:scss-alias-jump.openImportUnderCursor",
-    "onCommand:scss-alias-jump.debugClickTest"
+    "onCommand:scss-alias-jump.debugClickTest",
+    "onCommand:scss-alias-jump.clearCaches"
   ],
   "icon": "icon.png",
   "main": "./dist/extension.js",
@@ -46,6 +47,10 @@
       {
         "command": "scss-alias-jump.debugClickTest",
         "title": "SCSS Alias Jump: Debug Click Test (Show Range Info)"
+      },
+      {
+        "command": "scss-alias-jump.clearCaches",
+        "title": "SCSS Alias Jump: Clear Internal Caches"
       }
     ],
     "configuration": {
@@ -94,6 +99,12 @@
           "default": 2000,
           "minimum": 1,
           "markdownDescription": "Maximum number of candidate files considered per workspace scan before post-filtering and result limits are applied."
+        },
+        "scssAliasJump.cacheAutoClearIntervalMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 0,
+          "markdownDescription": "Automatically clears SCSS Alias Jump's internal path/scan caches on this interval, in milliseconds. Set to 0 to disable periodic clearing. Hung scans are still hard-timeout guarded."
         }
       }
     }

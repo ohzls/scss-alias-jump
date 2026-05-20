@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
-import { DEFAULT_SCAN_MAX_FILE_SIZE_KB, DEFAULT_SCAN_MAX_FILES } from "./constants";
+import {
+  DEFAULT_CACHE_AUTO_CLEAR_INTERVAL_MS,
+  DEFAULT_SCAN_MAX_FILE_SIZE_KB,
+  DEFAULT_SCAN_MAX_FILES,
+} from "./constants";
 
 export type AliasMap = Record<string, string>;
 
@@ -45,11 +49,18 @@ export function getScanMaxFiles(resource?: vscode.Uri): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_SCAN_MAX_FILES;
 }
 
+export function getCacheAutoClearIntervalMs(resource?: vscode.Uri): number {
+  const cfg = cfgFor(resource);
+  const value = cfg.get(`${CFG_ROOT}.cacheAutoClearIntervalMs`);
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_CACHE_AUTO_CLEAR_INTERVAL_MS;
+  return Math.max(0, Math.floor(value));
+}
+
 export function getScanConfigCacheKey(resource?: vscode.Uri): string {
   return JSON.stringify({
     exclude: getScanExcludePatterns(resource),
     maxBytes: getScanMaxFileSizeBytes(resource),
     maxFiles: getScanMaxFiles(resource),
+    cacheAutoClearIntervalMs: getCacheAutoClearIntervalMs(resource),
   });
 }
-

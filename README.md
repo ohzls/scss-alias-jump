@@ -31,7 +31,8 @@ Add aliases in your workspace/user settings:
   "scssAliasJump.hoverWorkspaceScan": true,
   "scssAliasJump.scanExclude": ["**/.svelte-kit/**", "**/.next/**", "**/dist-public/**"],
   "scssAliasJump.scanMaxFileSizeKB": 1024,
-  "scssAliasJump.scanMaxFiles": 2000
+  "scssAliasJump.scanMaxFiles": 2000,
+  "scssAliasJump.cacheAutoClearIntervalMs": 30000
 }
 ```
 
@@ -43,6 +44,7 @@ Add aliases in your workspace/user settings:
 - **`scssAliasJump.scanExclude`**: Additional generated-folder globs to skip during workspace scans. Defaults include `.svelte-kit`, `.next`, `dist-public`, `.turbo`, and `.cache`.
 - **`scssAliasJump.scanMaxFileSizeKB`**: Maximum file size read during workspace scans. Larger files are skipped to keep hover/definition responsive. **Default: `1024`**.
 - **`scssAliasJump.scanMaxFiles`**: Maximum candidate files considered per workspace scan before post-filtering/result limits. **Default: `2000`**.
+- **`scssAliasJump.cacheAutoClearIntervalMs`**: Periodically clears internal path/scan caches so stale or stuck state self-heals. Set to `0` to disable periodic clearing. **Default: `30000`**.
 
 ### `@extend %...` (placeholder) jump
 
@@ -80,9 +82,10 @@ Workspace scans used by hover, template class jumps, CSS Modules reverse jumps, 
 
 - provider cancellation is propagated into `workspace.findFiles` and scan loops;
 - repeated identical scans are de-duplicated while in flight;
+- in-flight scans have a hard timeout race so a `workspace.findFiles` cancellation stall cannot poison later clicks;
 - scan concurrency is capped so hover storms do not flood the extension host;
 - large files and generated folders are skipped by configurable guards;
-- Sass path lookup misses are short-lived and the path cache is cleared on Sass file create/delete and alias/workspace changes.
+- Sass path lookup misses are short-lived and the path cache is cleared on Sass file create/delete, alias/workspace changes, manual cache reset, and periodic auto-clear.
 
 ### How it resolves paths
 
@@ -207,8 +210,9 @@ GitHub Actions:
 
 ## Recent Updates
 
-### Version 0.3.2 (Latest)
+### Version 0.3.3 (Latest)
 
+- **Cache self-healing**: hard-timeout guarded in-flight scans, periodic cache auto-clear, and manual `SCSS Alias Jump: Clear Internal Caches`.
 - **Implicit `@scss/...` fallback**: vendored shared SCSS roots resolve to `${workspaceFolder}/vendor/_assets/scss/...` when no explicit alias is configured.
 - **Bidirectional CSS Modules jump**: 
   - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
@@ -223,6 +227,10 @@ GitHub Actions:
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
 
 ### History
+
+- **0.3.3**
+  - Added cache self-healing: hard scan timeout, periodic auto-clear, and a manual clear-caches command.
+
 
 - **0.3.2**
   - Fixed `@scss/...` Sass links for vendored shared SCSS roots such as `vendor/_assets/scss`.

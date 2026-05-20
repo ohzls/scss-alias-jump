@@ -14,7 +14,15 @@ export type WorkspaceScanOptions = {
   workspaceFolders?: readonly vscode.WorkspaceFolder[];
 };
 
-const inFlightScans = new Map<string, Promise<unknown>>();
+type InFlightScanEntry<T = unknown> = {
+  promise: Promise<T>;
+  cts: vscode.CancellationTokenSource;
+  reject: (error: unknown) => void;
+  releaseTurn: () => void;
+  startedAt: number;
+};
+
+const inFlightScans = new Map<string, InFlightScanEntry>();
 type ScanWaiter = {
   resolve: () => void;
   reject: (error: unknown) => void;
@@ -156,6 +164,10 @@ function waitForCancellation<T>(promise: Promise<T>, token?: vscode.Cancellation
   });
 }
 
+function cancellationError(): vscode.CancellationError {
+  return new vscode.CancellationError();
+}
+
 export function scanCacheKey(kind: string, query: string, options: WorkspaceScanOptions = {}): string {
   const scopeFolder = options.forUri
     ? (vscode.workspace.getWorkspaceFolder(options.forUri)?.uri.toString() ?? "no-workspace-folder")
@@ -175,32 +187,109 @@ export async function runDedupedCancellableScan<T>(
   options: WorkspaceScanOptions,
   scan: (token: vscode.CancellationToken) => Promise<T>
 ): Promise<T> {
-  const existing = inFlightScans.get(key) as Promise<T> | undefined;
+  const existing = inFlightScans.get(key) as InFlightScanEntry<T> | undefined;
   if (existing) {
-    return waitForCancellation(existing, options.token);
+    return waitForCancellation(existing.promise, options.token);
   }
 
   const cts = new vscode.CancellationTokenSource();
   const requestDispose = options.token?.onCancellationRequested(() => cts.cancel());
-  const timer = options.timeoutMs == null ? undefined : setTimeout(() => cts.cancel(), options.timeoutMs);
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let turnAcquired = false;
+  let turnReleased = false;
 
-  const promise = (async () => {
+  const releaseTurnOnce = () => {
+    if (!turnAcquired || turnReleased) return;
+    turnReleased = true;
+    releaseTurn();
+  };
+
+  let rejectFromReset: (error: unknown) => void = () => undefined;
+  const resetPromise = new Promise<T>((_resolve, reject) => {
+    rejectFromReset = reject;
+  });
+
+  const scanPromise = (async () => {
     await waitForTurn(cts.token);
+    turnAcquired = true;
     try {
       throwIfCancellationRequested(cts.token);
       return await scan(cts.token);
     } finally {
-      releaseTurn();
+      releaseTurnOnce();
     }
-  })().finally(() => {
-    if (timer) clearTimeout(timer);
+  })();
+
+  const timeoutPromise =
+    options.timeoutMs == null
+      ? null
+      : new Promise<T>((_resolve, reject) => {
+          timeoutTimer = setTimeout(() => {
+            cts.cancel();
+            releaseTurnOnce();
+            reject(cancellationError());
+          }, options.timeoutMs);
+        });
+
+  const promise = Promise.race(
+    timeoutPromise ? [scanPromise, resetPromise, timeoutPromise] : [scanPromise, resetPromise]
+  ).finally(() => {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     requestDispose?.dispose();
     cts.dispose();
     inFlightScans.delete(key);
   });
 
-  inFlightScans.set(key, promise);
+  inFlightScans.set(key, {
+    promise,
+    cts,
+    reject: rejectFromReset,
+    releaseTurn: releaseTurnOnce,
+    startedAt: Date.now(),
+  });
   return waitForCancellation(promise, options.token);
+}
+
+export type ClearWorkspaceScanStateOptions = {
+  minAgeMs?: number;
+};
+
+export function clearWorkspaceScanState(options: ClearWorkspaceScanStateOptions = {}): { inFlight: number; queued: number } {
+  const now = Date.now();
+  const entriesToClear = [...inFlightScans.entries()].filter(([_key, entry]) => {
+    return options.minAgeMs == null || now - entry.startedAt >= options.minAgeMs;
+  });
+
+  const inFlight = entriesToClear.length;
+  const queued = inFlight > 0 || options.minAgeMs == null ? scanWaitQueue.length : 0;
+
+  if (queued > 0) {
+    while (scanWaitQueue.length > 0) {
+      const waiter = scanWaitQueue.shift();
+      if (!waiter) continue;
+      waiter.cancelled = true;
+      waiter.dispose?.dispose();
+      waiter.reject(cancellationError());
+    }
+  }
+
+  for (const [key, entry] of entriesToClear) {
+    entry.cts.cancel();
+    entry.releaseTurn();
+    entry.reject(cancellationError());
+    inFlightScans.delete(key);
+  }
+
+  return { inFlight, queued };
+}
+
+export function getWorkspaceScanStateStats(): { inFlight: number; queued: number; oldestInFlightMs: number } {
+  const now = Date.now();
+  let oldestInFlightMs = 0;
+  for (const entry of inFlightScans.values()) {
+    oldestInFlightMs = Math.max(oldestInFlightMs, now - entry.startedAt);
+  }
+  return { inFlight: inFlightScans.size, queued: scanWaitQueue.length, oldestInFlightMs };
 }
 
 export async function findWorkspaceFiles(

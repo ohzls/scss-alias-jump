@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import {
+  CLEAR_CACHES_CMD,
   DEBUG_CLICK_TEST_CMD,
   DEBUG_SCAN_IMPORTS_CMD,
   OPEN_EXTEND_PLACEHOLDER_CMD,
@@ -10,6 +11,7 @@ import {
   SHOW_PLACEHOLDER_EXTENDS_CMD,
   USE_FORWARD_IMPORT_RE,
 } from "./constants";
+import { clearScssAliasJumpCaches } from "./cacheReset";
 import { getAliases } from "./settings";
 import { getDocFsPath } from "./docPath";
 import { ensureNoExt, resolveSassPathCached } from "./sassResolve";
@@ -49,6 +51,15 @@ async function runCancellableCommandScan<T>(
 }
 
 export function registerCommands(context: vscode.ExtensionContext, out: vscode.OutputChannel) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand(CLEAR_CACHES_CMD, () => {
+      const stats = clearScssAliasJumpCaches("manual-command", out);
+      vscode.window.showInformationMessage(
+        `SCSS Alias Jump: internal caches cleared (inFlight=${stats.inFlight}, queued=${stats.queued}).`
+      );
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       OPEN_EXTEND_PLACEHOLDER_CMD,

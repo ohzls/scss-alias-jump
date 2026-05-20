@@ -30,6 +30,12 @@ export type ClassUsage = {
 type ClassUsageCacheEntry = { ts: number; refs: ClassUsage[] };
 const classUsageCache = new Map<string, ClassUsageCacheEntry>();
 
+export function clearClassUsageCache(): number {
+  const size = classUsageCache.size;
+  classUsageCache.clear();
+  return size;
+}
+
 function fileHintFromPath(uri: vscode.Uri) {
   const b = path.basename(uri.fsPath);
   return b;

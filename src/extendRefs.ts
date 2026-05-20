@@ -22,6 +22,12 @@ export type ExtendRef = {
 type ExtendRefsCacheEntry2 = { ts: number; refs: ExtendRef[] };
 const extendRefsCache2 = new Map<string, ExtendRefsCacheEntry2>();
 
+export function clearExtendRefsCache(): number {
+  const size = extendRefsCache2.size;
+  extendRefsCache2.clear();
+  return size;
+}
+
 function pickContainer(stack: Array<{ text: string; depth: number; line: number }>) {
   for (let i = stack.length - 1; i >= 0; i--) {
     const t = stack[i]?.text?.trim() ?? "";

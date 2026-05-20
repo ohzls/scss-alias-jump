@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 // Keep in sync with package.json version for debugging.
-export const EXT_VERSION = "0.3.2";
+export const EXT_VERSION = "0.3.3";
 
 export const OUTPUT_CHANNEL_NAME = "SCSS Alias Jump";
 
@@ -27,6 +27,7 @@ export const CACHE_TTL_MS = 1500;
 export const SEARCH_TIMEOUT_MS = 1500;
 export const DEFAULT_SCAN_MAX_FILES = 2000;
 export const DEFAULT_SCAN_MAX_FILE_SIZE_KB = 1024;
+export const DEFAULT_CACHE_AUTO_CLEAR_INTERVAL_MS = 30_000;
 export const SCAN_LINE_CANCELLATION_INTERVAL = 100;
 export const SCAN_YIELD_FILE_INTERVAL = 20;
 export const MAX_CONCURRENT_WORKSPACE_SCANS = 2;
@@ -38,6 +39,7 @@ export const SHOW_CLASS_USAGES_CMD = "scss-alias-jump.showClassUsages";
 export const DEBUG_SCAN_IMPORTS_CMD = "scss-alias-jump.debugScanImports";
 export const OPEN_IMPORT_UNDER_CURSOR_CMD = "scss-alias-jump.openImportUnderCursor";
 export const DEBUG_CLICK_TEST_CMD = "scss-alias-jump.debugClickTest";
+export const CLEAR_CACHES_CMD = "scss-alias-jump.clearCaches";
 
 export const DEFINITION_SELECTOR: vscode.DocumentSelector = [
   { language: "scss" },

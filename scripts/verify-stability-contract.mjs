@@ -51,12 +51,95 @@ function verifyAliasResolutionFallback() {
   }
 }
 
+async function verifyHardTimeoutScanRecovery() {
+  const require = createRequire(import.meta.url);
+  const Module = require('node:module');
+  const distPath = path.join(root, 'dist', 'scan.js');
+  if (!fs.existsSync(distPath)) {
+    check('hard-timeout scan recovery dynamic check skipped until dist exists', true);
+    return;
+  }
+
+  class CancellationError extends Error {}
+  class CancellationTokenSource {
+    constructor() {
+      this._cancelled = false;
+      this._listeners = new Set();
+      this.token = {
+        get isCancellationRequested() {
+          return this._owner._cancelled;
+        },
+        onCancellationRequested: (listener) => {
+          this._listeners.add(listener);
+          return { dispose: () => this._listeners.delete(listener) };
+        },
+        _owner: this,
+      };
+    }
+    cancel() {
+      if (this._cancelled) return;
+      this._cancelled = true;
+      for (const listener of [...this._listeners]) listener();
+    }
+    dispose() {
+      this._listeners.clear();
+    }
+  }
+
+  const vscodeMock = {
+    CancellationError,
+    CancellationTokenSource,
+    workspace: {
+      workspaceFolders: [],
+      getWorkspaceFolder: () => undefined,
+      getConfiguration: () => ({ get: () => undefined }),
+    },
+  };
+
+  const originalLoad = Module._load;
+  try {
+    Module._load = function load(request, parent, isMain) {
+      if (request === 'vscode') return vscodeMock;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[require.resolve(distPath)];
+    const { runDedupedCancellableScan, getWorkspaceScanStateStats } = require(distPath);
+
+    let calls = 0;
+    const started = Date.now();
+    let timedOut = false;
+    try {
+      await runDedupedCancellableScan('dynamic-hard-timeout', { timeoutMs: 20 }, async () => {
+        calls += 1;
+        return new Promise(() => undefined);
+      });
+    } catch (error) {
+      timedOut = error instanceof CancellationError;
+    }
+
+    const elapsed = Date.now() - started;
+    check('hard-timeout rejects stuck scan as cancellation', timedOut, `elapsed=${elapsed}`);
+    check('hard-timeout returns promptly', elapsed < 500, `elapsed=${elapsed}`);
+
+    const second = await runDedupedCancellableScan('dynamic-hard-timeout', { timeoutMs: 200 }, async () => {
+      calls += 1;
+      return 'ok';
+    });
+    const stats = getWorkspaceScanStateStats();
+    check('hard-timeout evicts stale in-flight key', second === 'ok' && calls === 2, `second=${second}, calls=${calls}`);
+    check('hard-timeout leaves no queued scan state', stats.inFlight === 0 && stats.queued === 0, JSON.stringify(stats));
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
 function check(name, condition, detail) {
   if (condition) pass.push(name);
   else failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 verifyAliasResolutionFallback();
+await verifyHardTimeoutScanRecovery();
 
 const pkg = JSON.parse(read('package.json'));
 const constants = read('src/constants.ts');
@@ -73,6 +156,7 @@ for (const event of [
   'onCommand:scss-alias-jump.debugScanImports',
   'onCommand:scss-alias-jump.openImportUnderCursor',
   'onCommand:scss-alias-jump.debugClickTest',
+  'onCommand:scss-alias-jump.clearCaches',
 ]) {
   check(`activation includes ${event}`, activation.has(event));
 }
@@ -82,6 +166,7 @@ for (const setting of [
   'scssAliasJump.scanExclude',
   'scssAliasJump.scanMaxFileSizeKB',
   'scssAliasJump.scanMaxFiles',
+  'scssAliasJump.cacheAutoClearIntervalMs',
 ]) {
   check(`package setting ${setting}`, Object.prototype.hasOwnProperty.call(props, setting));
 }
@@ -95,7 +180,9 @@ const scan = read('src/scan.ts');
 check('scan utility passes token as findFiles fourth arg', /workspace\.findFiles\([^\n]+DEFAULT_SCAN_EXCLUDE_PATTERN,[^\n]+,[^\n]+token\)/.test(scan));
 check('scan utility has in-flight de-dupe map', scan.includes('inFlightScans') && scan.includes('runDedupedCancellableScan'));
 check('scan utility has global concurrency queue', scan.includes('MAX_CONCURRENT_WORKSPACE_SCANS') && scan.includes('scanWaitQueue'));
-check('scan utility timeout cancels underlying scan token', scan.includes('setTimeout(() => cts.cancel(), options.timeoutMs)') && scan.includes('scan(cts.token)'));
+check('scan utility timeout cancels underlying scan token', scan.includes('cts.cancel()') && scan.includes('options.timeoutMs') && scan.includes('scan(cts.token)'));
+check('scan utility hard-timeout races stuck scans', scan.includes('Promise.race') && scan.includes('timeoutPromise') && scan.includes('releaseTurnOnce()'));
+check('scan utility exposes scan-state reset', scan.includes('clearWorkspaceScanState') && scan.includes('getWorkspaceScanStateStats'));
 check('scan utility links request cancellation to underlying token', scan.includes('options.token?.onCancellationRequested(() => cts.cancel())'));
 check('scan cache key includes scope/config', scan.includes('scopeFolder') && scan.includes('scopeMode') && scan.includes('getScanConfigCacheKey'));
 
@@ -123,6 +210,13 @@ check('sass resolver watcher ignores content changes', sassResolve.includes('cre
 
 const extension = read('src/extension.ts');
 check('extension registers Sass cache invalidation', extension.includes('registerSassResolveCacheInvalidation(context, out)'));
+check('extension registers automatic cache reset', extension.includes('registerAutomaticCacheReset(context, out)'));
+
+const cacheReset = read('src/cacheReset.ts');
+check('automatic cache reset clears all internal cache/state buckets', cacheReset.includes('clearSassResolveCache') && cacheReset.includes('clearClassUsageCache') && cacheReset.includes('clearExtendRefsCache') && cacheReset.includes('clearWorkspaceScanState'));
+check('automatic cache reset has periodic interval setting', cacheReset.includes('getCacheAutoClearIntervalMs') && cacheReset.includes('setInterval'));
+
+check('commands register manual cache clear command', commands.includes('CLEAR_CACHES_CMD') && commands.includes('clearScssAliasJumpCaches("manual-command"'));
 
 const directFindFiles = [];
 for (const dir of ['src']) {

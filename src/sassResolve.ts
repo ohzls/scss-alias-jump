@@ -50,8 +50,10 @@ type ResolveCacheEntry = {
 
 const resolveCache = new Map<string, ResolveCacheEntry>();
 
-export function clearSassResolveCache(): void {
+export function clearSassResolveCache(): number {
+  const size = resolveCache.size;
   resolveCache.clear();
+  return size;
 }
 
 export function resolveSassPathCached(basePathNoExt: string): Promise<string | null> {

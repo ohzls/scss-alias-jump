@@ -10,6 +10,7 @@ import { registerCommands } from "./commands";
 import { ScssAliasDefinitionProvider } from "./providers/definitionProvider";
 import { ScssAliasDocumentLinkProvider } from "./providers/documentLinkProvider";
 import { ScssAliasHoverProvider } from "./providers/hoverProvider";
+import { registerAutomaticCacheReset } from "./cacheReset";
 import { registerSassResolveCacheInvalidation } from "./sassResolve";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -33,6 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   registerSassResolveCacheInvalidation(context, out);
+  registerAutomaticCacheReset(context, out);
   registerCommands(context, out);
 
   context.subscriptions.push(out);
