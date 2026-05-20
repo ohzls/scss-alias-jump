@@ -27,6 +27,26 @@ import { info } from "./output";
 import { ScssAliasDocumentLinkProvider } from "./providers/documentLinkProvider";
 import { ScssAliasDefinitionProvider } from "./providers/definitionProvider";
 import { splitLines, formatFileLocation } from "./strings";
+import { isCancellationError } from "./scan";
+
+async function runCancellableCommandScan<T>(
+  title: string,
+  out: vscode.OutputChannel,
+  task: (token: vscode.CancellationToken) => Promise<T>
+): Promise<T | null> {
+  try {
+    return await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title, cancellable: true },
+      async (_progress, token) => task(token)
+    );
+  } catch (error) {
+    if (isCancellationError(error)) {
+      info(out, `[cancel] ${title}`);
+      return null;
+    }
+    throw error;
+  }
+}
 
 export function registerCommands(context: vscode.ExtensionContext, out: vscode.OutputChannel) {
   context.subscriptions.push(
@@ -37,7 +57,12 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           const fromUri = vscode.Uri.parse(fromUriString);
           info(out, `[cmd] openExtendPlaceholder: %${placeholder} (from ${fromUri.fsPath})`);
 
-          const locs = await findPlaceholderDefinitions(placeholder, fromUri, out);
+          const locs = await runCancellableCommandScan(
+            `SCSS Alias Jump: %${placeholder} 정의 검색`,
+            out,
+            (token) => findPlaceholderDefinitions(placeholder, fromUri, out, { token })
+          );
+          if (locs === null) return;
           if (locs.length === 0) {
             vscode.window.showInformationMessage(
               `SCSS Alias Jump: %${placeholder} 정의를 찾지 못했어요. (Output: SCSS Alias Jump 확인)`
@@ -78,8 +103,14 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
       SHOW_PLACEHOLDER_EXTENDS_CMD,
       async (_fromUriString: string, placeholder: string) => {
         try {
+          const fromUri = vscode.Uri.parse(_fromUriString);
           info(out, `[cmd] showPlaceholderExtends: %${placeholder}`);
-          const refs = await findExtendReferences(placeholder);
+          const refs = await runCancellableCommandScan(
+            `SCSS Alias Jump: @extend %${placeholder} 사용처 검색`,
+            out,
+            (token) => findExtendReferences(placeholder, { forUri: fromUri, token })
+          );
+          if (refs === null) return;
           if (refs.length === 0) {
             vscode.window.showInformationMessage(
               `SCSS Alias Jump: @extend %${placeholder} 사용처를 찾지 못했어요.`
@@ -116,8 +147,14 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
       SHOW_CLASS_USAGES_CMD,
       async (_fromUriString: string, className: string) => {
         try {
+          const fromUri = vscode.Uri.parse(_fromUriString);
           info(out, `[cmd] showClassUsages: .${className}`);
-          const refs = await findClassUsages(className);
+          const refs = await runCancellableCommandScan(
+            `SCSS Alias Jump: .${className} 사용처 검색`,
+            out,
+            (token) => findClassUsages(className, { forUri: fromUri, token })
+          );
+          if (refs === null) return;
           if (refs.length === 0) {
             vscode.window.showInformationMessage(
               `SCSS Alias Jump: .${className} 사용처를 찾지 못했어요.`

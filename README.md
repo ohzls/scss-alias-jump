@@ -28,15 +28,21 @@ Add aliases in your workspace/user settings:
     "@scss": "${workspaceFolder:_assets}/scss"
   },
   "scssAliasJump.debugLogging": false,
-  "scssAliasJump.hoverWorkspaceScan": true
+  "scssAliasJump.hoverWorkspaceScan": true,
+  "scssAliasJump.scanExclude": ["**/.svelte-kit/**", "**/.next/**", "**/dist-public/**"],
+  "scssAliasJump.scanMaxFileSizeKB": 1024,
+  "scssAliasJump.scanMaxFiles": 2000
 }
 ```
 
 **Configuration options:**
 
-- **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces.
+- **`scssAliasJump.aliases`**: Map import aliases to absolute paths. Supports VS Code variables like `${workspaceFolder}` or `${workspaceFolder:folderName}` for multi-root workspaces. If no explicit alias matches, `@/…` falls back to `${workspaceFolder}/src/…` for the current document's workspace folder.
 - **`scssAliasJump.debugLogging`**: Enable verbose debug logging to Output panel (default: `false`).
 - **`scssAliasJump.hoverWorkspaceScan`**: Enable workspace-wide scans for hover features (class usages / `@extend` references). **Default: `true`**. Disable if experiencing delays in very large projects.
+- **`scssAliasJump.scanExclude`**: Additional generated-folder globs to skip during workspace scans. Defaults include `.svelte-kit`, `.next`, `dist-public`, `.turbo`, and `.cache`.
+- **`scssAliasJump.scanMaxFileSizeKB`**: Maximum file size read during workspace scans. Larger files are skipped to keep hover/definition responsive. **Default: `1024`**.
+- **`scssAliasJump.scanMaxFiles`**: Maximum candidate files considered per workspace scan before post-filtering/result limits. **Default: `2000`**.
 
 ### `@extend %...` (placeholder) jump
 
@@ -67,9 +73,20 @@ Hover on a placeholder definition to see where it’s extended in the current wo
 - Hover nested selectors inside a placeholder block (heuristic):
   - `%chat { &__input { &-docker { ... }}}` → hover `&__input` / `&-docker` to search `@extend %chat__input-docker`
 
+
+### Stability and large-workspace responsiveness
+
+Workspace scans used by hover, template class jumps, CSS Modules reverse jumps, and `%placeholder` jumps are cancellable and bounded:
+
+- provider cancellation is propagated into `workspace.findFiles` and scan loops;
+- repeated identical scans are de-duplicated while in flight;
+- scan concurrency is capped so hover storms do not flood the extension host;
+- large files and generated folders are skipped by configurable guards;
+- Sass path lookup misses are short-lived and the path cache is cleared on Sass file create/delete and alias/workspace changes.
+
 ### How it resolves paths
 
-Given an absolute base path (after alias/relative expansion) it tries common Sass resolution candidates:
+Given an absolute base path (after alias/relative expansion) it tries common Sass resolution candidates. Explicit aliases win; otherwise the common `@/` convention resolves to the current workspace folder's `src` directory:
 
 - `path.scss` / `path.sass` / `path.css`
 - `_path.scss` / `_path.sass` / `_path.css`
@@ -137,6 +154,57 @@ Supports:
 - `class:foo` (Svelte)
 - Multiple classes: `class="foo bar baz"` (click on specific class)
 
+
+### Bundle and install in Cursor
+
+Create a verified VSIX bundle:
+
+```bash
+npm run bundle
+```
+
+This runs `compile`, `verify:stability`, `vscode:prepublish`, then `vsce package --out scss-alias-jump-<version>.vsix`.
+
+Create and install into Cursor in one step:
+
+```bash
+npm run bundle:cursor
+```
+
+If Cursor is not on your shell path, pass the binary explicitly:
+
+```bash
+node ./scripts/bundle.mjs --install-cursor --cursor-bin /path/to/cursor
+```
+
+
+### Publish to VS Code Marketplace
+
+Prerequisites:
+
+1. Create or verify the Marketplace publisher id in `package.json` (`seongwonseo`).
+2. Create an Azure DevOps Personal Access Token with Marketplace `Manage` scope.
+3. Store it as `VSCE_PAT` locally or as the GitHub repository secret `VSCE_PAT`.
+
+Local dry run:
+
+```bash
+npm run publish:marketplace:dry
+```
+
+Local publish:
+
+```bash
+VSCE_PAT=... npm run publish:marketplace -- --skip-duplicate
+```
+
+The publish script validates `package.json`/`package-lock.json` version parity, requires a dated `CHANGELOG.md` entry for the current version, builds the verified VSIX, then publishes that exact VSIX via `vsce publish --packagePath`.
+
+GitHub Actions:
+
+- `Publish VS Code Extension` can be run manually with `dry_run=true` for validation only.
+- Pushing a `v*` tag publishes with `--skip-duplicate` using the `VSCE_PAT` secret.
+
 ## Recent Updates
 
 ### Version 0.3.0 (Latest)
@@ -154,6 +222,10 @@ Supports:
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
 
 ### History
+
+- **0.3.1**
+  - Stabilized large-workspace scans, fixed `@/` Sass link fallback, and added verified Cursor VSIX bundling.
+
 
 - **0.2.0**
   - (fill)

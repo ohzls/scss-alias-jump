@@ -1,0 +1,57 @@
+name: Publish VS Code Extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and validate only; do not publish"
+        required: true
+        type: boolean
+        default: true
+      skip_duplicate:
+        description: "Do not fail if this version already exists on Marketplace"
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-vscode-extension-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish or dry run
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          SKIP_DUPLICATE: ${{ github.event_name == 'push' || inputs.skip_duplicate }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          if [ "${SKIP_DUPLICATE}" = "true" ]; then
+            args+=(--skip-duplicate)
+          fi
+          npm run publish:marketplace -- "${args[@]}"

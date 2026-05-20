@@ -111,6 +111,14 @@ export function resolveAliasToAbsolute(
     }
   }
 
+  // Common frontend convention: @/ points at the current workspace src folder.
+  // Keep explicit scssAliasJump.aliases authoritative; this fallback only runs
+  // when no configured alias matched above.
+  if ((p === "@" || p.startsWith("@/")) && wsFsPath) {
+    const rest = p === "@" ? "" : p.slice(2);
+    return path.resolve(wsFsPath, "src", rest);
+  }
+
   if (p.startsWith(".")) {
     return path.resolve(path.dirname(docFsPath), p);
   }

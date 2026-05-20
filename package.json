@@ -3,7 +3,7 @@
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
   "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "private": false,
   "engines": {
@@ -17,7 +17,19 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onLanguage:scss",
+    "onLanguage:sass",
+    "onLanguage:css",
+    "onLanguage:vue",
+    "onLanguage:svelte",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onCommand:scss-alias-jump.debugScanImports",
+    "onCommand:scss-alias-jump.openImportUnderCursor",
+    "onCommand:scss-alias-jump.debugClickTest"
   ],
   "icon": "icon.png",
   "main": "./dist/extension.js",
@@ -56,6 +68,32 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "scssAliasJump.scanExclude": {
+          "type": "array",
+          "default": [
+            "**/.svelte-kit/**",
+            "**/.next/**",
+            "**/dist-public/**",
+            "**/.turbo/**",
+            "**/.cache/**"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Additional workspace-scan exclude globs applied after VS Code default excludes. Use this to skip generated folders in very large projects."
+        },
+        "scssAliasJump.scanMaxFileSizeKB": {
+          "type": "number",
+          "default": 1024,
+          "minimum": 1,
+          "markdownDescription": "Maximum file size, in KB, that SCSS Alias Jump reads during workspace scans. Larger files are skipped to keep hover/definition responsive."
+        },
+        "scssAliasJump.scanMaxFiles": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1,
+          "markdownDescription": "Maximum number of candidate files considered per workspace scan before post-filtering and result limits are applied."
         }
       }
     }
@@ -67,7 +105,12 @@
     "release:patch": "node ./scripts/release.mjs patch",
     "release:minor": "node ./scripts/release.mjs minor",
     "release:major": "node ./scripts/release.mjs major",
-    "release:set": "node ./scripts/release.mjs set"
+    "release:set": "node ./scripts/release.mjs set",
+    "verify:stability": "node ./scripts/verify-stability-contract.mjs",
+    "bundle": "node ./scripts/bundle.mjs",
+    "bundle:cursor": "node ./scripts/bundle.mjs --install-cursor",
+    "publish:marketplace": "node ./scripts/publish.mjs",
+    "publish:marketplace:dry": "node ./scripts/publish.mjs --dry-run"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

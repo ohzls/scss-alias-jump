@@ -4,7 +4,15 @@ import { escapeRegExp, splitLines } from "./strings";
 import { braceDelta, hasBraceSoon, tokenBoundaryOk, firstNonCommentIdx } from "./textScan";
 import { debug as dbg } from "./output";
 import { buildOpenSelectorStack } from "./cssInference";
-import { AMP_SELECTOR_RE, PLACEHOLDER_SELECTOR_RE, EXCLUDE_PATTERN } from "./constants";
+import { AMP_SELECTOR_RE, PLACEHOLDER_SELECTOR_RE, SCAN_LINE_CANCELLATION_INTERVAL } from "./constants";
+import {
+  findWorkspaceFiles,
+  runDedupedCancellableScan,
+  scanCacheKey,
+  throwIfCancellationRequested,
+  WorkspaceScanOptions,
+  yieldToExtensionHostIfNeeded,
+} from "./scan";
 
 function findOpeningBraceLine(
   lines: string[],
@@ -282,155 +290,185 @@ function findDirectPlaceholderDefinitionOnLine(
 export async function findPlaceholderDefinitions(
   placeholderName: string,
   forUri: vscode.Uri,
-  out?: vscode.OutputChannel
+  out?: vscode.OutputChannel,
+  options: WorkspaceScanOptions = {}
 ): Promise<vscode.Location[]> {
-  const folders = getWorkspaceFoldersInSearchOrder(forUri);
-  const token = `%${placeholderName}`;
-  const hitKey = (loc: vscode.Location) => `${loc.uri.toString()}::${loc.range.start.line}:${loc.range.start.character}`;
-  const hits: vscode.Location[] = [];
-  const seen = new Set<string>();
+  const scanOptions: WorkspaceScanOptions = { ...options, forUri };
+  const key = scanCacheKey("placeholder-definitions", placeholderName, scanOptions);
 
-  const filesCache = new Map<string, readonly vscode.Uri[]>();
-  const textCache = new Map<string, string | null>();
+  return runDedupedCancellableScan(key, scanOptions, async (token) => {
+    const folders = getWorkspaceFoldersInSearchOrder(forUri);
+    const tokenText = `%${placeholderName}`;
+    const hitKey = (loc: vscode.Location) => `${loc.uri.toString()}::${loc.range.start.line}:${loc.range.start.character}`;
+    const hits: vscode.Location[] = [];
+    const seen = new Set<string>();
 
-  const listFiles = async (folder: vscode.WorkspaceFolder) => {
-    const key = folder.uri.toString();
-    const cached = filesCache.get(key);
-    if (cached) return cached;
-    const pattern = new vscode.RelativePattern(folder, "**/*.{scss,sass}");
-    const files = await vscode.workspace.findFiles(pattern, EXCLUDE_PATTERN);
-    filesCache.set(key, files);
-    return files;
-  };
+    const filesCache = new Map<string, readonly vscode.Uri[]>();
+    const textCache = new Map<string, string | null>();
 
-  const getText = async (file: vscode.Uri) => {
-    const key = file.toString();
-    if (textCache.has(key)) return textCache.get(key) ?? null;
-    const t = await readTextFile(file);
-    textCache.set(key, t);
-    return t;
-  };
+    const listFiles = async (folder: vscode.WorkspaceFolder) => {
+      throwIfCancellationRequested(token);
+      const key = folder.uri.toString();
+      const cached = filesCache.get(key);
+      if (cached) return cached;
+      const files = await findWorkspaceFiles("**/*.{scss,sass}", { ...scanOptions, token, workspaceFolders: [folder] });
+      filesCache.set(key, files);
+      return files;
+    };
 
-  const pushHit = (loc: vscode.Location) => {
-    const k = hitKey(loc);
-    if (seen.has(k)) return;
-    seen.add(k);
-    hits.push(loc);
-  };
+    const getText = async (file: vscode.Uri) => {
+      throwIfCancellationRequested(token);
+      const key = file.toString();
+      if (textCache.has(key)) return textCache.get(key) ?? null;
+      const t = await readTextFile(file, { token });
+      textCache.set(key, t);
+      return t;
+    };
 
-  for (const folder of folders) {
-    const files = await listFiles(folder);
-    for (const file of files) {
-      const text = await getText(file);
-      if (!text || !text.includes(token)) continue;
+    const pushHit = (loc: vscode.Location) => {
+      const k = hitKey(loc);
+      if (seen.has(k)) return;
+      seen.add(k);
+      hits.push(loc);
+    };
 
-      const lines = splitLines(text);
-      for (let i = 0; i < lines.length; i++) {
-        const direct = findDirectPlaceholderDefinitionOnLine(lines, i, token);
-        if (!direct) continue;
-        pushHit(new vscode.Location(file, new vscode.Position(direct.line, direct.ch)));
-      }
-    }
-  }
+    for (const folder of folders) {
+      const files = await listFiles(folder);
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        throwIfCancellationRequested(token);
+        const file = files[fileIndex];
+        const text = await getText(file);
+        if (!text || !text.includes(tokenText)) continue;
 
-  const split = splitPlaceholderName(placeholderName);
-  const prefixes = buildPrefixCandidates(split.root, split.parts);
-
-  for (const folder of folders) {
-    const files = await listFiles(folder);
-    for (const file of files) {
-      const text = await getText(file);
-      if (!text) continue;
-      if (!prefixes.some((p) => text.includes(`%${p.prefix}`))) continue;
-
-      const lines = splitLines(text);
-      for (const pref of prefixes) {
-        const baseToken = `%${pref.prefix}`;
+        const lines = splitLines(text);
         for (let i = 0; i < lines.length; i++) {
-          const line = lines[i] ?? "";
-          if (!line.includes(baseToken)) continue;
-          if (line.includes("@extend")) continue;
-
-          const idx = line.indexOf(baseToken);
-          if (idx < 0) continue;
-          if (!tokenBoundaryOk(line, idx, baseToken.length)) continue;
-
-          const braceLine = findOpeningBraceLine(lines, i);
-          if (braceLine == null) continue;
-          const endLine = findBlockEndLine(lines, braceLine);
-
-          const remaining = split.parts.slice(pref.usedParts);
-          const found = findNestedChainInBlock(lines, braceLine, endLine, remaining);
-          if (found) {
-            pushHit(new vscode.Location(file, new vscode.Position(found.line, found.ch)));
-          }
+          if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
+          const direct = findDirectPlaceholderDefinitionOnLine(lines, i, tokenText);
+          if (!direct) continue;
+          pushHit(new vscode.Location(file, new vscode.Position(direct.line, direct.ch)));
         }
-      }
-    }
-  }
-
-  if (hits.length === 0) {
-    const shorterPrefixes = prefixes
-      .filter((p) => p.usedParts < split.parts.length)
-      .sort((a, b) => b.usedParts - a.usedParts);
-
-    for (const pref of shorterPrefixes) {
-      const baseToken = `%${pref.prefix}`;
-      for (const folder of folders) {
-        const files = await listFiles(folder);
-        for (const file of files) {
-          const text = await getText(file);
-          if (!text || !text.includes(baseToken)) continue;
-          const lines = splitLines(text);
-          for (let i = 0; i < lines.length; i++) {
-            const direct = findDirectPlaceholderDefinitionOnLine(lines, i, baseToken);
-            if (!direct) continue;
-            if (out) {
-              dbg(
-                out,
-                `[fallback] @extend %${placeholderName} -> %${pref.prefix} @ ${file.fsPath}:${direct.line + 1}`
-              );
-            }
-            return [new vscode.Location(file, new vscode.Position(direct.line, direct.ch))];
-          }
-        }
+        await yieldToExtensionHostIfNeeded(fileIndex + 1, token);
       }
     }
 
-    for (const pref of shorterPrefixes) {
-      const re = new RegExp(`%${escapeRegExp(pref.prefix)}(?:__|--|_|-)?#\\{`, "g");
-      for (const folder of folders) {
-        const files = await listFiles(folder);
-        for (const file of files) {
-          const text = await getText(file);
-          if (!text || !re.test(text)) continue;
-          const lines = splitLines(text);
+    const split = splitPlaceholderName(placeholderName);
+    const prefixes = buildPrefixCandidates(split.root, split.parts);
+
+    for (const folder of folders) {
+      const files = await listFiles(folder);
+
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        throwIfCancellationRequested(token);
+        const file = files[fileIndex];
+        const text = await getText(file);
+        if (!text) continue;
+        if (!prefixes.some((p) => text.includes(`%${p.prefix}`))) continue;
+
+        const lines = splitLines(text);
+        for (const pref of prefixes) {
+          const baseToken = `%${pref.prefix}`;
           for (let i = 0; i < lines.length; i++) {
+            if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
             const line = lines[i] ?? "";
-            const m = line.match(re);
-            if (!m) continue;
-            const idx = line.search(re);
-            if (idx < 0) continue;
+            if (!line.includes(baseToken)) continue;
             if (line.includes("@extend")) continue;
-            if (!hasBraceSoon(lines, i, idx + 2)) continue;
-            if (out) {
-              dbg(
-                out,
-                `[fallback] @extend %${placeholderName} -> %${pref.prefix}{interpolation} @ ${file.fsPath}:${i + 1}`
-              );
+
+            const idx = line.indexOf(baseToken);
+            if (idx < 0) continue;
+            if (!tokenBoundaryOk(line, idx, baseToken.length)) continue;
+
+            const braceLine = findOpeningBraceLine(lines, i);
+            if (braceLine == null) continue;
+            const endLine = findBlockEndLine(lines, braceLine);
+
+            const remaining = split.parts.slice(pref.usedParts);
+            const found = findNestedChainInBlock(lines, braceLine, endLine, remaining);
+            if (found) {
+              pushHit(new vscode.Location(file, new vscode.Position(found.line, found.ch)));
             }
-            return [new vscode.Location(file, new vscode.Position(i, idx))];
+          }
+        }
+        await yieldToExtensionHostIfNeeded(fileIndex + 1, token);
+      }
+    }
+
+    if (hits.length === 0) {
+      const shorterPrefixes = prefixes
+        .filter((p) => p.usedParts < split.parts.length)
+        .sort((a, b) => b.usedParts - a.usedParts);
+
+      for (const pref of shorterPrefixes) {
+        const baseToken = `%${pref.prefix}`;
+        for (const folder of folders) {
+          const files = await listFiles(folder);
+          for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+            throwIfCancellationRequested(token);
+            const file = files[fileIndex];
+            const text = await getText(file);
+            if (!text || !text.includes(baseToken)) continue;
+            const lines = splitLines(text);
+            for (let i = 0; i < lines.length; i++) {
+              if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
+              const direct = findDirectPlaceholderDefinitionOnLine(lines, i, baseToken);
+              if (!direct) continue;
+              if (out) {
+                dbg(
+                  out,
+                  `[fallback] @extend %${placeholderName} -> %${pref.prefix} @ ${file.fsPath}:${direct.line + 1}`
+                );
+              }
+              return [new vscode.Location(file, new vscode.Position(direct.line, direct.ch))];
+            }
+            await yieldToExtensionHostIfNeeded(fileIndex + 1, token);
+          }
+        }
+      }
+
+      for (const pref of shorterPrefixes) {
+        const re = new RegExp(`%${escapeRegExp(pref.prefix)}(?:__|--|_|-)?#\{`, "g");
+        for (const folder of folders) {
+          const files = await listFiles(folder);
+          for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+            throwIfCancellationRequested(token);
+            const file = files[fileIndex];
+            const text = await getText(file);
+            if (!text) continue;
+            re.lastIndex = 0;
+            if (!re.test(text)) continue;
+            const lines = splitLines(text);
+            for (let i = 0; i < lines.length; i++) {
+              if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
+              const line = lines[i] ?? "";
+              re.lastIndex = 0;
+              const m = line.match(re);
+              if (!m) continue;
+              re.lastIndex = 0;
+              const idx = line.search(re);
+              if (idx < 0) continue;
+              if (line.includes("@extend")) continue;
+              if (!hasBraceSoon(lines, i, idx + 2)) continue;
+              if (out) {
+                dbg(
+                  out,
+                  `[fallback] @extend %${placeholderName} -> %${pref.prefix}{interpolation} @ ${file.fsPath}:${i + 1}`
+                );
+              }
+              return [new vscode.Location(file, new vscode.Position(i, idx))];
+            }
+            await yieldToExtensionHostIfNeeded(fileIndex + 1, token);
           }
         }
       }
     }
-  }
 
-  if (hits.length === 0) {
-    if (out) dbg(out, `[miss] @extend %${placeholderName} (placeholder definition not found)`);
-    return [];
-  }
+    throwIfCancellationRequested(token);
 
-  if (out) dbg(out, `[hit] @extend %${placeholderName} -> ${hits.length}개 정의 후보`);
-  return hits;
+    if (hits.length === 0) {
+      if (out) dbg(out, `[miss] @extend %${placeholderName} (placeholder definition not found)`);
+      return [];
+    }
+
+    if (out) dbg(out, `[hit] @extend %${placeholderName} -> ${hits.length}개 정의 후보`);
+    return hits;
+  });
 }

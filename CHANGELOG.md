@@ -5,6 +5,23 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-20
+
+### Fixed
+- Fixed `@use '@/...'` links in workspaces without explicit `scssAliasJump.aliases` by falling back to the current workspace `src` folder and setting resolved document-link targets immediately.
+
+### Improved
+- Added cancellable, bounded workspace scans for hover/definition hot paths to reduce intermittent extension-host stalls in large workspaces.
+- Added scan guards for generated folders, maximum file size, maximum candidate files, in-flight scan de-duplication, and scan concurrency.
+- Added language and contributed-command activation events so the extension can activate when supported file types/commands are used, while retaining `onStartupFinished`.
+- Changed Sass path resolution cache so misses are short-lived and cache is cleared on Sass file create/delete plus alias/workspace changes.
+
+### Added
+- `scssAliasJump.scanExclude`, `scssAliasJump.scanMaxFileSizeKB`, and `scssAliasJump.scanMaxFiles` settings.
+- `npm run verify:stability` guard for scan cancellation/cache/activation contract checks.
+- `npm run bundle` and `npm run bundle:cursor` automation for verified VSIX packaging and optional Cursor installation.
+- `npm run publish:marketplace`, `npm run publish:marketplace:dry`, and a GitHub Actions workflow for PAT-backed Marketplace publishing.
+
 ## [0.3.0] - 2026-01-20
 
 ### Added

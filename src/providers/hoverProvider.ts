@@ -2,7 +2,6 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { SHOW_CLASS_USAGES_CMD, SHOW_PLACEHOLDER_EXTENDS_CMD, OPEN_LOCATION_CMD, SEARCH_TIMEOUT_MS } from "../constants";
 import { getDocFsPath } from "../docPath";
-import { withTimeout } from "../async";
 import { isHoverWorkspaceScanEnabled } from "../settings";
 import { splitLines, formatFileLocation } from "../strings";
 import { parseScssVariables } from "../scssVariables";
@@ -16,6 +15,7 @@ import {
 import { inferCssClassNameAtLine } from "../cssInference";
 import { findClassUsages } from "../classUsage";
 import { findExtendReferences } from "../extendRefs";
+import { isCancellationError } from "../scan";
 import { inferNestedPlaceholderNameAtLine, inferPlaceholderNameFromOpenStack } from "../placeholders";
 import { findVariableDefinitionInModule, resolveSassModuleFromUse } from "../sassModule";
 
@@ -40,11 +40,17 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
         const uses = parseUseNamespaceMap(document.getText());
         const importPath = uses.get(varRef.namespace);
         if (importPath) {
-          const moduleUri = await resolveSassModuleFromUse(importPath, document);
+          const moduleUri = await resolveSassModuleFromUse(importPath, document, token).catch((error) => {
+            if (isCancellationError(error)) return null;
+            throw error;
+          });
           if (token.isCancellationRequested) return null;
           if (moduleUri) {
             const loc =
-              (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set())) ??
+              (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set(), token).catch((error) => {
+                if (isCancellationError(error)) return null;
+                throw error;
+              })) ??
               new vscode.Location(moduleUri, new vscode.Position(0, 0));
 
             const md = new vscode.MarkdownString();
@@ -81,7 +87,10 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
         if (token.isCancellationRequested) return null;
         const lineText = document.lineAt(position.line).text;
         if (!lineText.includes("@extend")) {
-          const refs = await withTimeout(findClassUsages(className), SEARCH_TIMEOUT_MS).catch(() => []);
+          const refs = await findClassUsages(className, { forUri: document.uri, token, timeoutMs: SEARCH_TIMEOUT_MS }).catch((error) => {
+            if (isCancellationError(error)) return [];
+            return [];
+          });
           const md = new vscode.MarkdownString();
           md.isTrusted = true;
           md.appendMarkdown(`**.${className}**\n\n`);
@@ -132,7 +141,10 @@ export class ScssAliasHoverProvider implements vscode.HoverProvider {
     const lineText = document.lineAt(position.line).text;
     if (lineText.includes("@extend")) return null;
 
-    const refs = await withTimeout(findExtendReferences(name), SEARCH_TIMEOUT_MS).catch(() => []);
+    const refs = await findExtendReferences(name, { forUri: document.uri, token, timeoutMs: SEARCH_TIMEOUT_MS }).catch((error) => {
+      if (isCancellationError(error)) return [];
+      return [];
+    });
     const md = new vscode.MarkdownString();
     md.isTrusted = true;
     md.appendMarkdown(`**%${name}**\n\n`);

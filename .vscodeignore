@@ -6,3 +6,12 @@ tsconfig.json
 package-lock.json
 node_modules/**
 
+docs/**
+scripts/**
+AGENTS.md
+*.vsix
+.gitignore
+.github/**
+
+.env
+.env.*

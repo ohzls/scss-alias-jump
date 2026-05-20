@@ -5,18 +5,23 @@ import { resolveAliasToAbsolute } from "./aliasResolve";
 import { ensureNoExt, resolveSassPathCached } from "./sassResolve";
 import { readTextFile } from "./fsText";
 import { stripComments } from "./textScan";
+import { SCAN_LINE_CANCELLATION_INTERVAL } from "./constants";
+import { throwIfCancellationRequested } from "./scan";
 import { escapeRegExp, splitLines } from "./strings";
 
 export async function resolveSassModuleFromUse(
   importPath: string,
-  fromDoc: vscode.TextDocument
+  fromDoc: vscode.TextDocument,
+  token?: vscode.CancellationToken
 ): Promise<vscode.Uri | null> {
   const aliases = getAliases(fromDoc.uri);
   const docFsPath = getDocFsPath(fromDoc);
   if (!docFsPath) return null;
   const abs = resolveAliasToAbsolute(importPath, docFsPath, aliases, fromDoc.uri);
   if (!abs) return null;
+  throwIfCancellationRequested(token);
   const resolved = await resolveSassPathCached(ensureNoExt(abs));
+  throwIfCancellationRequested(token);
   if (!resolved) return null;
   return vscode.Uri.file(resolved);
 }
@@ -24,18 +29,20 @@ export async function resolveSassModuleFromUse(
 export async function findVariableDefinitionInModule(
   moduleUri: vscode.Uri,
   varName: string,
-  visited: Set<string>
+  visited: Set<string>,
+  token?: vscode.CancellationToken
 ): Promise<vscode.Location | null> {
   const key = moduleUri.toString();
   if (visited.has(key)) return null;
   visited.add(key);
 
-  const text = await readTextFile(moduleUri);
+  const text = await readTextFile(moduleUri, { token });
   if (!text) return null;
 
   const re = new RegExp(`\\$${escapeRegExp(varName)}\\s*:`);
   const lines = splitLines(text);
   for (let i = 0; i < lines.length; i++) {
+    if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
     const raw = lines[i] ?? "";
     const line = stripComments(raw);
     if (!line.includes(`$${varName}`)) continue;
@@ -46,6 +53,7 @@ export async function findVariableDefinitionInModule(
 
   const forwardRe = /@forward\s+(['"])([^'"]+)\1/g;
   for (let i = 0; i < lines.length; i++) {
+    if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
     const raw = lines[i] ?? "";
     const line = stripComments(raw);
     if (!line.includes("@forward")) continue;
@@ -57,10 +65,12 @@ export async function findVariableDefinitionInModule(
       const aliases = getAliases(moduleUri);
       const abs = resolveAliasToAbsolute(importPath, moduleUri.fsPath, aliases, moduleUri);
       if (!abs) continue;
+      throwIfCancellationRequested(token);
       const resolved = await resolveSassPathCached(ensureNoExt(abs));
+      throwIfCancellationRequested(token);
       if (!resolved) continue;
       const nextUri = vscode.Uri.file(resolved);
-      const hit = await findVariableDefinitionInModule(nextUri, varName, visited);
+      const hit = await findVariableDefinitionInModule(nextUri, varName, visited, token);
       if (hit) return hit;
     }
   }

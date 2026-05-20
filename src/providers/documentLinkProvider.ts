@@ -101,11 +101,10 @@ export class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvide
       if (path.resolve(it.resolved) === path.resolve(docFsPath)) continue;
 
       const range = new vscode.Range(document.positionAt(it.start), document.positionAt(it.end));
-      // Create link WITHOUT target for lazy resolution (forces VSCode to call resolveDocumentLink)
-      const link = new vscode.DocumentLink(range);
+      const link = new vscode.DocumentLink(range, vscode.Uri.file(it.resolved));
       link.tooltip = `SCSS Alias Jump: Open ${path.basename(it.resolved)}`;
-      
-      // Store resolved path for resolveDocumentLink
+
+      // Keep the resolved path for resolveDocumentLink as a defensive fallback.
       (link as any).scssAliasJumpTarget = it.resolved;
 
       const key = `${range.start.line}:${range.start.character}-${range.end.character}:${it.resolved}`;

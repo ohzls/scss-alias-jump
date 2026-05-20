@@ -10,6 +10,7 @@ import { registerCommands } from "./commands";
 import { ScssAliasDefinitionProvider } from "./providers/definitionProvider";
 import { ScssAliasDocumentLinkProvider } from "./providers/documentLinkProvider";
 import { ScssAliasHoverProvider } from "./providers/hoverProvider";
+import { registerSassResolveCacheInvalidation } from "./sassResolve";
 
 export function activate(context: vscode.ExtensionContext) {
   const out = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
@@ -31,6 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider(HOVER_SELECTOR, hoverProvider)
   );
 
+  registerSassResolveCacheInvalidation(context, out);
   registerCommands(context, out);
 
   context.subscriptions.push(out);

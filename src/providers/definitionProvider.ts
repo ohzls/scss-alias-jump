@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { EXTEND_PLACEHOLDER_RE, USE_FORWARD_IMPORT_RE } from "../constants";
+import { EXTEND_PLACEHOLDER_RE, SEARCH_TIMEOUT_MS, USE_FORWARD_IMPORT_RE } from "../constants";
 import { getAliases, isDebugLoggingEnabled } from "../settings";
 import { getDocFsPath } from "../docPath";
 import { ensureNoExt, resolveSassPathCached } from "../sassResolve";
@@ -16,11 +16,12 @@ import {
 import { findPlaceholderDefinitions } from "../placeholders";
 import { findVariableDefinitionInModule, resolveSassModuleFromUse } from "../sassModule";
 import { debug as dbg } from "../output";
-import { findClassDefinitionInDocument, findClassDefinitionInWorkspace, findClassUsages, findClassUsagesByPrefix } from "../classUsage";
+import { findClassDefinitionInDocument, findClassDefinitionInWorkspace, findClassUsages } from "../classUsage";
 import { parseScssVariables } from "../scssVariables";
 import { inferCssClassNameAtLine, buildOpenSelectorStack } from "../cssInference";
 import { splitLines } from "../strings";
 import { findCssModuleImport, resolveCssModulePath } from "../cssModules";
+import { isCancellationError } from "../scan";
 
 export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private out: vscode.OutputChannel) {}
@@ -125,7 +126,14 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
               }
 
               // If not found in the same file, search workspace
-              const locations = await findClassDefinitionInWorkspace(cssModuleRef.className);
+              const locations = await findClassDefinitionInWorkspace(cssModuleRef.className, {
+                forUri: document.uri,
+                token,
+                timeoutMs: SEARCH_TIMEOUT_MS,
+              }).catch((error) => {
+                if (isCancellationError(error)) return [];
+                throw error;
+              });
               if (locations.length > 0) {
                 if (debug) {
                   dbg(
@@ -193,7 +201,14 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
           }
 
           // Find usages in template files and CSS Modules
-          const usages = await findClassUsages(inferredClassName);
+          const usages = await findClassUsages(inferredClassName, {
+              forUri: document.uri,
+              token,
+              timeoutMs: SEARCH_TIMEOUT_MS,
+            }).catch((error) => {
+              if (isCancellationError(error)) return [];
+              throw error;
+            });
           if (usages.length > 0) {
             if (debug) {
               dbg(
@@ -233,7 +248,14 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         // Then search in workspace
-        const workspaceDefs = await findClassDefinitionInWorkspace(classMatch);
+        const workspaceDefs = await findClassDefinitionInWorkspace(classMatch, {
+          forUri: document.uri,
+          token,
+          timeoutMs: SEARCH_TIMEOUT_MS,
+        }).catch((error) => {
+          if (isCancellationError(error)) return [];
+          throw error;
+        });
         if (workspaceDefs.length > 0) {
           if (debug) {
             dbg(
@@ -257,12 +279,18 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
       const importPath = uses.get(varRef.namespace);
       if (!importPath) return null;
 
-      const moduleUri = await resolveSassModuleFromUse(importPath, document);
+      const moduleUri = await resolveSassModuleFromUse(importPath, document, token).catch((error) => {
+        if (isCancellationError(error)) return null;
+        throw error;
+      });
       if (token.isCancellationRequested) return null;
       if (!moduleUri) return null;
 
       const loc =
-        (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set())) ??
+        (await findVariableDefinitionInModule(moduleUri, varRef.varName, new Set(), token).catch((error) => {
+          if (isCancellationError(error)) return null;
+          throw error;
+        })) ??
         new vscode.Location(moduleUri, new vscode.Position(0, 0));
       return loc;
     }
@@ -277,7 +305,13 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
       const endIdx = startIdx + tok.length;
 
       if (position.character >= startIdx && position.character <= endIdx) {
-        const locs = await findPlaceholderDefinitions(placeholder, document.uri, this.out);
+        const locs = await findPlaceholderDefinitions(placeholder, document.uri, this.out, {
+          token,
+          timeoutMs: SEARCH_TIMEOUT_MS,
+        }).catch((error) => {
+          if (isCancellationError(error)) return [];
+          throw error;
+        });
         if (locs.length === 0) return null;
         return locs.length === 1 ? locs[0] : locs;
       }
