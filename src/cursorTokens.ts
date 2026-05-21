@@ -46,19 +46,23 @@ export function isOnAmpSelector(
 }
 
 /**
- * Extract CSS Module class reference (styles.className or $style.className)
+ * Extract CSS Module class reference (styles.className, layout.className, or $style.className)
  * Returns className and the import variable name
  */
 export function getCssModuleClassUnderCursor(
   document: vscode.TextDocument,
-  position: vscode.Position
+  position: vscode.Position,
+  allowedImportVars?: readonly string[]
 ): { className: string; importVar: string } | null {
   const lineText = document.lineAt(position.line).text;
+  const allowed = allowedImportVars ? new Set(allowedImportVars) : null;
   
-  // Match styles.className or $style.className
+  // Match any imported CSS Module namespace (`styles.foo`, `layout.foo`,
+  // `appLayout.foo`) and Vue's built-in `$style.foo` namespace. Whether the
+  // namespace is actually a CSS Module import is validated by the provider
+  // before this helper is called.
   const patterns = [
-    /\b(styles)\s*\.\s*([A-Za-z0-9_-]+)/g,
-    /\$([a-zA-Z0-9_]+)\s*\.\s*([A-Za-z0-9_-]+)/g,
+    /(^|[^A-Za-z0-9_$.])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z0-9_-]+)/g,
   ];
   
   for (const pattern of patterns) {
@@ -66,10 +70,11 @@ export function getCssModuleClassUnderCursor(
     let match: RegExpExecArray | null;
     
     while ((match = pattern.exec(lineText))) {
-      const importVar = match[1];
-      const className = match[2];
-      const matchStart = match.index;
-      const matchEnd = matchStart + match[0].length;
+      const importVar = match[2];
+      const className = match[3];
+      const matchStart = match.index + match[1].length;
+      const matchEnd = match.index + match[0].length;
+      if (allowed && !allowed.has(importVar)) continue;
       
       // Allow cursor anywhere in the match (styles.fileItem)
       // User can click on 'styles', '.', or 'fileItem' - all should work

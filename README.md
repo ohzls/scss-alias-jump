@@ -9,8 +9,8 @@ VS Code extension that enables Cmd/Ctrl+Click (Go to Definition) for SCSS/Sass `
 - **`@use`/`@forward`/`@import` path jump**: Cmd/Ctrl+Click on import paths with alias prefixes
 - **`@extend %placeholder` jump**: Jump to placeholder definitions, including nested structures
 - **Bidirectional CSS Modules jump (NEW)**:
-  - React/TypeScript → SCSS: `styles.fileItem` → `.fileItem` definition
-  - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` usages
+  - React/TypeScript → SCSS: `styles.fileItem` / `layout.pageInner` → `.fileItem` / `.pageInner` definition
+  - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` / `layout.fileItem` usages
 - **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
 - **SCSS nesting support**: Automatically resolves nested selectors like `.chat { &-header-actions { ... } }`
 - **SCSS interpolation support**: Handles `#{$variable}` patterns in selectors
@@ -108,6 +108,15 @@ import styles from './ChatInput.module.scss'
 ```
 → Jumps to `.fileItem` in `ChatInput.module.scss`
 
+The import namespace is not hardcoded to `styles`; aliases such as `layout.pageInner`,
+`appLayout.shell`, or `wbStyles.button` also work when they come from a stylesheet import:
+
+```tsx
+import layout from '@/AppLayout.module.scss'
+
+<main className={layout.pageInner}>  // Cmd+Click → AppLayout.module.scss .pageInner
+```
+
 **SCSS → TypeScript (Reverse Jump):**
 ```scss
 .fileItem {  // Cmd+Click on ".fileItem" or "&Item"
@@ -124,7 +133,9 @@ import styles from './ChatInput.module.scss'
 → Shows QuickPick list of all `styles.fileItem` or `styles.auxMenu` usages
 
 **Supports:**
+- Import namespaces: `styles.foo`, `layout.foo`, `appLayout.foo`, etc.
 - Import patterns: `import styles from './X.module.scss'` or `import styles from './X.module'`
+- Alias CSS Module imports such as `import layout from '@/AppLayout.module.scss'`
 - SCSS interpolation: `#{$variable}` in selectors
 - Nested selectors: `#{$aux} { &Menu { ... } }` → `auxMenu`
 
@@ -211,8 +222,11 @@ GitHub Actions:
 
 ## Recent Updates
 
-### Version 0.3.4 (Latest)
+### Version 0.3.5 (Latest)
 
+- **CSS Module namespace fix**: Cmd/Ctrl-click now handles imported namespaces like `layout.pageInner`, `appLayout.shell`, and `wbStyles.button`, not only `styles.foo`.
+- **Alias CSS Module imports**: CSS Module imports such as `@/AppLayout.module.scss` resolve through the same alias/fallback path logic.
+- **Safer namespace matching**: JS/TS property chains and non-imported namespaces are ignored so clicks do not fall through to unrelated providers as often.
 - **Stronger click reliability**: import path document links also include the basename segment, reducing conflicts with built-in Sass links.
 - **Bounded manual scans**: manual usage/placeholder scan commands now use command-level timeouts.
 - **Cache self-healing**: hard-timeout guarded in-flight scans, periodic cache auto-clear, and manual `SCSS Alias Jump: Clear Internal Caches`.
@@ -230,6 +244,9 @@ GitHub Actions:
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
 
 ### History
+
+- **0.3.5**
+  - Fixed CSS Module jumps for arbitrary imported namespaces such as `layout.pageInner`, including alias imports like `@/AppLayout.module.scss`.
 
 - **0.3.4**
   - Added basename-segment import links and bounded manual command scans to close red-team follow-ups.

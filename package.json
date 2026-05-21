@@ -2,8 +2,8 @@
   "name": "scss-alias-jump",
   "publisher": "seongwonseo",
   "displayName": "SCSS Alias Jump",
-  "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (styles.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
-  "version": "0.3.4",
+  "description": "Bidirectional jump between SCSS and React/Vue/Svelte. CSS Modules support (importName.className ↔ .className). SCSS @use/@forward/@import with aliases. Interpolation #{$var} support.",
+  "version": "0.3.5",
   "license": "MIT",
   "private": false,
   "engines": {

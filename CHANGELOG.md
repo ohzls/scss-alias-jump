@@ -5,6 +5,16 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-05-21
+
+### Fixed
+- Fixed CSS Module forward jumps for arbitrary imported namespaces such as `layout.pageInner`, `appLayout.shell`, and `wbStyles.button`, instead of only the conventional `styles.foo` namespace.
+- Fixed alias-based CSS Module imports such as `import layout from '@/AppLayout.module.scss'` by resolving through the extension's alias/fallback path logic.
+
+### Improved
+- CSS Module reverse usage scans now detect imported stylesheet namespaces instead of searching only `styles.*` and `$style.*`.
+- Added stability guards for arbitrary CSS Module namespaces, alias CSS Module imports, and non-imported/property-chain false positives.
+
 ## [0.3.4] - 2026-05-21
 
 ### Fixed

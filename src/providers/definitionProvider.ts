@@ -20,7 +20,7 @@ import { findClassDefinitionInDocument, findClassDefinitionInWorkspace, findClas
 import { parseScssVariables } from "../scssVariables";
 import { inferCssClassNameAtLine, buildOpenSelectorStack } from "../cssInference";
 import { splitLines } from "../strings";
-import { findCssModuleImport, resolveCssModulePath } from "../cssModules";
+import { findCssModuleImport, findCssModuleImportVars, resolveCssModulePath } from "../cssModules";
 import { isCancellationError } from "../scan";
 
 export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
@@ -63,7 +63,9 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
         );
       }
       
-      const cssModuleRef = getCssModuleClassUnderCursor(document, position);
+      const text = document.getText();
+      const cssModuleImportVars = findCssModuleImportVars(text);
+      const cssModuleRef = getCssModuleClassUnderCursor(document, position, cssModuleImportVars);
       
       if (debug && !cssModuleRef) {
         dbg(
@@ -83,7 +85,6 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         // Find the CSS Module import path
-        const text = document.getText();
         const importPath = findCssModuleImport(text, cssModuleRef.importVar);
         
         if (importPath) {
@@ -98,7 +99,12 @@ export class ScssAliasDefinitionProvider implements vscode.DefinitionProvider {
           // Resolve to absolute path
           const docFsPath = getDocFsPath(document);
           if (docFsPath) {
-            const scssFilePath = await resolveCssModulePath(importPath, docFsPath);
+            const scssFilePath = await resolveCssModulePath(
+              importPath,
+              docFsPath,
+              getAliases(document.uri),
+              document.uri
+            );
             
             if (scssFilePath) {
               if (debug) {

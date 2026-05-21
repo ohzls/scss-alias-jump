@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import { readTextFile } from "./fsText";
+import { findCssModuleImportVars } from "./cssModules";
 import { stripComments, tokenBoundaryOk } from "./textScan";
 import { inferCssClassNameAtLine } from "./cssInference";
 import { escapeRegExp, splitLines } from "./strings";
@@ -41,7 +42,7 @@ function fileHintFromPath(uri: vscode.Uri) {
   return b;
 }
 
-function lineHasClassUsageSignal(line: string) {
+function lineHasClassUsageSignal(line: string, cssModuleImportVars: readonly string[] = []) {
   return (
     line.includes("class=") ||
     line.includes("className=") ||
@@ -51,8 +52,17 @@ function lineHasClassUsageSignal(line: string) {
     line.includes("clsx(") ||
     line.includes("classnames(") ||
     line.includes("styles.") ||      // CSS Modules (React/Vue)
-    line.includes("$style.")          // CSS Modules (Vue)
+    line.includes("$style.") ||       // CSS Modules (Vue)
+    cssModuleImportVars.some((importVar) => line.includes(`${importVar}.`))
   );
+}
+
+function buildCssModuleUsagePatterns(importVars: readonly string[], tokenText: string): RegExp[] {
+  const patterns = importVars.map(
+    (importVar) => new RegExp(`\\b${escapeRegExp(importVar)}\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g")
+  );
+  patterns.push(new RegExp(`\\$style\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g"));
+  return patterns;
 }
 
 export async function findClassUsages(
@@ -76,6 +86,7 @@ export async function findClassUsages(
       const text = await readTextFile(file, { token });
       if (!text) continue;
       if (!text.includes(tokenText)) continue;
+      const cssModuleImportVars = findCssModuleImportVars(text);
 
       const lines = splitLines(text);
       for (let i = 0; i < lines.length; i++) {
@@ -83,15 +94,11 @@ export async function findClassUsages(
         const raw = lines[i] ?? "";
         const line = stripComments(raw);
         if (!line.includes(tokenText)) continue;
-        if (!lineHasClassUsageSignal(line)) continue;
+        if (!lineHasClassUsageSignal(line, cssModuleImportVars)) continue;
 
-        // First check for CSS Modules usage (styles.mainMenu or $style.mainMenu)
-        const cssModulesPatterns = [
-          // styles.mainMenu - React/Next.js CSS Modules
-          new RegExp(`\\bstyles\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g"),
-          // $style.mainMenu - Vue CSS Modules
-          new RegExp(`\\$style\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g"),
-        ];
+        // First check for CSS Modules usage (`styles.mainMenu`, `layout.mainMenu`,
+        // or Vue `$style.mainMenu`).
+        const cssModulesPatterns = buildCssModuleUsagePatterns(cssModuleImportVars, tokenText);
 
         let foundCssModules = false;
         for (const pattern of cssModulesPatterns) {
@@ -159,42 +166,34 @@ export async function findClassUsagesByPrefix(
       const file = files[fileIndex];
       const text = await readTextFile(file, { token });
       if (!text) continue;
+      const cssModuleImportVars = findCssModuleImportVars(text);
 
       const lines = splitLines(text);
       for (let i = 0; i < lines.length; i++) {
         if (i % SCAN_LINE_CANCELLATION_INTERVAL === 0) throwIfCancellationRequested(token);
         const raw = lines[i] ?? "";
         const line = stripComments(raw);
-        if (!lineHasClassUsageSignal(line)) continue;
+        if (!lineHasClassUsageSignal(line, cssModuleImportVars)) continue;
 
-        // Check for CSS Modules usage (styles.auxMenu, styles.auxItem, etc.)
-        const cssModulesPattern = new RegExp(`\\bstyles\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, "g");
-        cssModulesPattern.lastIndex = 0;
-
-        let match: RegExpExecArray | null;
-        while ((match = cssModulesPattern.exec(line))) {
-          const fullClassName = match[1]; // auxMenu, auxItem, etc.
-          const dotIdx = match.index + match[0].indexOf(".");
-          refs.push({
-            uri: file,
-            pos: new vscode.Position(i, dotIdx + 1),
-            hint: `${fileHintFromPath(file)} (${fullClassName})`,
-          });
-          if (refs.length >= MAX_SEARCH_RESULTS) break;
-        }
-
-        // Also check for $style (Vue)
-        const vueModulesPattern = new RegExp(`\\$style\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, "g");
-        vueModulesPattern.lastIndex = 0;
-
-        while ((match = vueModulesPattern.exec(line))) {
-          const fullClassName = match[1];
-          const dotIdx = match.index + match[0].indexOf(".");
-          refs.push({
-            uri: file,
-            pos: new vscode.Position(i, dotIdx + 1),
-            hint: `${fileHintFromPath(file)} (${fullClassName})`,
-          });
+        const cssModulesPatterns = [
+          ...cssModuleImportVars.map(
+            (importVar) => new RegExp(`\\b${escapeRegExp(importVar)}\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, "g")
+          ),
+          new RegExp(`\\$style\\.(${escapeRegExp(classPrefix)}[A-Za-z0-9_-]*)(?![A-Za-z0-9_])`, "g"),
+        ];
+        for (const cssModulesPattern of cssModulesPatterns) {
+          let match: RegExpExecArray | null;
+          cssModulesPattern.lastIndex = 0;
+          while ((match = cssModulesPattern.exec(line))) {
+            const fullClassName = match[1]; // auxMenu, auxItem, etc.
+            const dotIdx = match.index + match[0].indexOf(".");
+            refs.push({
+              uri: file,
+              pos: new vscode.Position(i, dotIdx + 1),
+              hint: `${fileHintFromPath(file)} (${fullClassName})`,
+            });
+            if (refs.length >= MAX_SEARCH_RESULTS) break;
+          }
           if (refs.length >= MAX_SEARCH_RESULTS) break;
         }
 

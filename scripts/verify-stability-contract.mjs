@@ -219,6 +219,93 @@ async function verifyDocumentLinkBasenameTarget() {
   }
 }
 
+async function verifyCssModuleNamespaceResolution() {
+  const require = createRequire(import.meta.url);
+  const Module = require('node:module');
+  const cursorTokensPath = path.join(root, 'dist', 'cursorTokens.js');
+  const cssModulesPath = path.join(root, 'dist', 'cssModules.js');
+  if (!fs.existsSync(cursorTokensPath) || !fs.existsSync(cssModulesPath)) {
+    check('CSS Modules namespace dynamic check skipped until dist exists', true);
+    return;
+  }
+
+  const workspaceRoot = '/tmp/scss-alias-jump-test/nlrc';
+  const appFile = `${workspaceRoot}/src/App.tsx`;
+  const targetPath = `${workspaceRoot}/src/AppLayout.module.scss`;
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Range {
+    constructor(startLine, startChar, endLine, endChar) {
+      this.start = new Position(startLine, startChar);
+      this.end = new Position(endLine, endChar);
+    }
+  }
+  class CancellationError extends Error {}
+  const folder = { name: 'nlrc', uri: { fsPath: workspaceRoot, toString: () => `file://${workspaceRoot}` } };
+  const vscodeMock = {
+    CancellationError,
+    Position,
+    Range,
+    Uri: { file: (fsPath) => ({ fsPath, toString: () => `file://${fsPath}` }) },
+    workspace: {
+      workspaceFolders: [folder],
+      getWorkspaceFolder(uri) {
+        return uri.fsPath && uri.fsPath.startsWith(`${workspaceRoot}/`) ? folder : undefined;
+      },
+      getConfiguration: () => ({ get: () => undefined }),
+      fs: {
+        async stat(uri) {
+          if (uri.fsPath === targetPath) return { type: 1, size: 10 };
+          throw new Error(`not found: ${uri.fsPath}`);
+        },
+      },
+    },
+  };
+
+  const originalLoad = Module._load;
+  try {
+    Module._load = function load(request, parent, isMain) {
+      if (request === 'vscode') return vscodeMock;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[require.resolve(cursorTokensPath)];
+    delete require.cache[require.resolve(cssModulesPath)];
+    const { getCssModuleClassUnderCursor } = require(cursorTokensPath);
+    const { findCssModuleImport, findCssModuleImportVars, resolveCssModulePath } = require(cssModulesPath);
+    const source = "import layout from '@/AppLayout.module.scss'\nconst className = layout.pageInner";
+    const importVars = findCssModuleImportVars(source);
+    const line = 'const className = layout.pageInner';
+    const doc = {
+      lineAt: () => ({ text: line }),
+      getText: (range) => line.slice(range.start.character, range.end.character),
+      getWordRangeAtPosition: () => null,
+    };
+    const ref = getCssModuleClassUnderCursor(doc, new Position(0, line.indexOf('pageInner') + 2), importVars);
+    check('CSS Module cursor parser accepts arbitrary import namespace', ref?.importVar === 'layout' && ref?.className === 'pageInner', JSON.stringify(ref));
+
+    const nonImportedLine = 'const other = element.style.position';
+    const nonImportedDoc = { ...doc, lineAt: () => ({ text: nonImportedLine }) };
+    const nonImportedRef = getCssModuleClassUnderCursor(nonImportedDoc, new Position(0, nonImportedLine.indexOf('position') + 2), importVars);
+    check('CSS Module cursor parser ignores non-imported namespaces', nonImportedRef === null, JSON.stringify(nonImportedRef));
+
+    const chainedLine = 'const other = props.layout.pageInner';
+    const chainedDoc = { ...doc, lineAt: () => ({ text: chainedLine }) };
+    const chainedRef = getCssModuleClassUnderCursor(chainedDoc, new Position(0, chainedLine.indexOf('pageInner') + 2), importVars);
+    check('CSS Module cursor parser ignores property-chain namespaces', chainedRef === null, JSON.stringify(chainedRef));
+
+    check('CSS Module import path resolves for arbitrary namespace', findCssModuleImport(source, 'layout') === '@/AppLayout.module.scss');
+    check('CSS Module import vars include arbitrary namespace', importVars.includes('layout'));
+    const resolved = await resolveCssModulePath('@/AppLayout.module.scss', appFile, {}, { fsPath: appFile, toString: () => `file://${appFile}` });
+    check('CSS Module alias import resolves via @ fallback', resolved === targetPath, resolved ?? 'null');
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
 function check(name, condition, detail) {
   if (condition) pass.push(name);
   else failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
@@ -227,6 +314,7 @@ function check(name, condition, detail) {
 verifyAliasResolutionFallback();
 await verifyHardTimeoutScanRecovery();
 await verifyDocumentLinkBasenameTarget();
+await verifyCssModuleNamespaceResolution();
 
 const pkg = JSON.parse(read('package.json'));
 const constants = read('src/constants.ts');
@@ -295,6 +383,19 @@ check('commands pass timeout into extend scan', /findExtendReferences\([^\n]+\{[
 
 const documentLinkProvider = read('src/providers/documentLinkProvider.ts');
 check('document links add basename segment target', documentLinkProvider.includes('basenameStartInImport') && documentLinkProvider.includes('pushResolvedLink'));
+
+const cursorTokens = read('src/cursorTokens.ts');
+check('CSS Module cursor parser is namespace-generic and import-var gated', cursorTokens.includes('layout.className') && cursorTokens.includes('allowedImportVars'));
+
+const cssModules = read('src/cssModules.ts');
+check('CSS Module helper exposes imported namespace collection', cssModules.includes('findCssModuleImportVars'));
+check('CSS Module path resolver uses alias resolution', cssModules.includes('resolveAliasToAbsolute'));
+
+const definitionProvider = read('src/providers/definitionProvider.ts');
+check('definition provider passes imported CSS Module namespaces into cursor parser', definitionProvider.includes('findCssModuleImportVars') && definitionProvider.includes('getCssModuleClassUnderCursor(document, position, cssModuleImportVars)'));
+
+const classUsage = read('src/classUsage.ts');
+check('CSS Module reverse usage scan uses imported namespaces', classUsage.includes('findCssModuleImportVars') && classUsage.includes('buildCssModuleUsagePatterns'));
 
 const sassResolve = read('src/sassResolve.ts');
 check('sass resolver negative cache is short-lived', sassResolve.includes('NEGATIVE_CACHE_TTL_MS'));
