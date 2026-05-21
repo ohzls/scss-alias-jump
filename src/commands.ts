@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   CLEAR_CACHES_CMD,
+  COMMAND_SCAN_TIMEOUT_MS,
   DEBUG_CLICK_TEST_CMD,
   DEBUG_SCAN_IMPORTS_CMD,
   OPEN_EXTEND_PLACEHOLDER_CMD,
@@ -71,7 +72,11 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           const locs = await runCancellableCommandScan(
             `SCSS Alias Jump: %${placeholder} 정의 검색`,
             out,
-            (token) => findPlaceholderDefinitions(placeholder, fromUri, out, { token })
+            (token) =>
+              findPlaceholderDefinitions(placeholder, fromUri, out, {
+                token,
+                timeoutMs: COMMAND_SCAN_TIMEOUT_MS,
+              })
           );
           if (locs === null) return;
           if (locs.length === 0) {
@@ -119,7 +124,12 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           const refs = await runCancellableCommandScan(
             `SCSS Alias Jump: @extend %${placeholder} 사용처 검색`,
             out,
-            (token) => findExtendReferences(placeholder, { forUri: fromUri, token })
+            (token) =>
+              findExtendReferences(placeholder, {
+                forUri: fromUri,
+                token,
+                timeoutMs: COMMAND_SCAN_TIMEOUT_MS,
+              })
           );
           if (refs === null) return;
           if (refs.length === 0) {
@@ -163,7 +173,12 @@ export function registerCommands(context: vscode.ExtensionContext, out: vscode.O
           const refs = await runCancellableCommandScan(
             `SCSS Alias Jump: .${className} 사용처 검색`,
             out,
-            (token) => findClassUsages(className, { forUri: fromUri, token })
+            (token) =>
+              findClassUsages(className, {
+                forUri: fromUri,
+                token,
+                timeoutMs: COMMAND_SCAN_TIMEOUT_MS,
+              })
           );
           if (refs === null) return;
           if (refs.length === 0) {

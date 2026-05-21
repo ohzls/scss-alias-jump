@@ -83,6 +83,7 @@ Workspace scans used by hover, template class jumps, CSS Modules reverse jumps, 
 - provider cancellation is propagated into `workspace.findFiles` and scan loops;
 - repeated identical scans are de-duplicated while in flight;
 - in-flight scans have a hard timeout race so a `workspace.findFiles` cancellation stall cannot poison later clicks;
+- manual scan commands also use bounded timeouts instead of unbounded progress-only scans;
 - scan concurrency is capped so hover storms do not flood the extension host;
 - large files and generated folders are skipped by configurable guards;
 - Sass path lookup misses are short-lived and the path cache is cleared on Sass file create/delete, alias/workspace changes, manual cache reset, and periodic auto-clear.
@@ -210,8 +211,10 @@ GitHub Actions:
 
 ## Recent Updates
 
-### Version 0.3.3 (Latest)
+### Version 0.3.4 (Latest)
 
+- **Stronger click reliability**: import path document links also include the basename segment, reducing conflicts with built-in Sass links.
+- **Bounded manual scans**: manual usage/placeholder scan commands now use command-level timeouts.
 - **Cache self-healing**: hard-timeout guarded in-flight scans, periodic cache auto-clear, and manual `SCSS Alias Jump: Clear Internal Caches`.
 - **Implicit `@scss/...` fallback**: vendored shared SCSS roots resolve to `${workspaceFolder}/vendor/_assets/scss/...` when no explicit alias is configured.
 - **Bidirectional CSS Modules jump**: 
@@ -228,9 +231,11 @@ GitHub Actions:
 
 ### History
 
+- **0.3.4**
+  - Added basename-segment import links and bounded manual command scans to close red-team follow-ups.
+
 - **0.3.3**
   - Added cache self-healing: hard scan timeout, periodic auto-clear, and a manual clear-caches command.
-
 
 - **0.3.2**
   - Fixed `@scss/...` Sass links for vendored shared SCSS roots such as `vendor/_assets/scss`.

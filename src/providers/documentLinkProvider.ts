@@ -44,6 +44,29 @@ export class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvide
     return results;
   }
 
+  private pushResolvedLink(
+    links: vscode.DocumentLink[],
+    seen: Set<string>,
+    document: vscode.TextDocument,
+    start: number,
+    end: number,
+    resolved: string
+  ): void {
+    if (end <= start) return;
+
+    const range = new vscode.Range(document.positionAt(start), document.positionAt(end));
+    const key = `${range.start.line}:${range.start.character}-${range.end.character}:${resolved}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    const link = new vscode.DocumentLink(range, vscode.Uri.file(resolved));
+    link.tooltip = `SCSS Alias Jump: Open ${path.basename(resolved)}`;
+
+    // Keep the resolved path for resolveDocumentLink as a defensive fallback.
+    (link as any).scssAliasJumpTarget = resolved;
+    links.push(link);
+  }
+
   async provideDocumentLinks(
     document: vscode.TextDocument,
     token: vscode.CancellationToken
@@ -100,17 +123,23 @@ export class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvide
 
       if (path.resolve(it.resolved) === path.resolve(docFsPath)) continue;
 
-      const range = new vscode.Range(document.positionAt(it.start), document.positionAt(it.end));
-      const link = new vscode.DocumentLink(range, vscode.Uri.file(it.resolved));
-      link.tooltip = `SCSS Alias Jump: Open ${path.basename(it.resolved)}`;
+      this.pushResolvedLink(links, seen, document, it.start, it.end, it.resolved);
 
-      // Keep the resolved path for resolveDocumentLink as a defensive fallback.
-      (link as any).scssAliasJumpTarget = it.resolved;
-
-      const key = `${range.start.line}:${range.start.character}-${range.end.character}:${it.resolved}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      links.push(link);
+      // Some built-in Sass document-link providers claim only the basename
+      // segment (for example `button` in `@/scss/button`). Add a more specific
+      // same-target link on that basename so our resolved absolute target can
+      // win when the user Cmd/Ctrl-clicks the visible filename segment.
+      const basenameStartInImport = it.importPath.lastIndexOf("/") + 1;
+      if (basenameStartInImport > 0 && basenameStartInImport < it.importPath.length) {
+        this.pushResolvedLink(
+          links,
+          seen,
+          document,
+          it.start + basenameStartInImport,
+          it.end,
+          it.resolved
+        );
+      }
     }
 
     return links;

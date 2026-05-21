@@ -133,6 +133,92 @@ async function verifyHardTimeoutScanRecovery() {
   }
 }
 
+async function verifyDocumentLinkBasenameTarget() {
+  const require = createRequire(import.meta.url);
+  const Module = require('node:module');
+  const distPath = path.join(root, 'dist', 'providers', 'documentLinkProvider.js');
+  if (!fs.existsSync(distPath)) {
+    check('basename document-link dynamic check skipped until dist exists', true);
+    return;
+  }
+
+  const workspaceRoot = '/tmp/scss-alias-jump-test/nlrc';
+  const targetPath = `${workspaceRoot}/vendor/_assets/scss/_base/__reset.scss`;
+  const line = "@use '@scss/_base/__reset' as *;";
+  const docPath = `${workspaceRoot}/src/AppLayout.module.scss`;
+  const folder = { name: 'nlrc', uri: { fsPath: workspaceRoot, toString: () => `file://${workspaceRoot}` } };
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Range {
+    constructor(startLineOrPos, startCharOrPos, endLine, endChar) {
+      if (typeof startLineOrPos === 'number') {
+        this.start = new Position(startLineOrPos, startCharOrPos);
+        this.end = new Position(endLine, endChar);
+      } else {
+        this.start = startLineOrPos;
+        this.end = startCharOrPos;
+      }
+    }
+  }
+  class DocumentLink {
+    constructor(range, target) {
+      this.range = range;
+      this.target = target;
+    }
+  }
+  class CancellationError extends Error {}
+  const vscodeMock = {
+    CancellationError,
+    Position,
+    Range,
+    DocumentLink,
+    Uri: { file: (fsPath) => ({ fsPath, toString: () => `file://${fsPath}` }) },
+    workspace: {
+      workspaceFolders: [folder],
+      getWorkspaceFolder(uri) {
+        return uri.fsPath && uri.fsPath.startsWith(`${workspaceRoot}/`) ? folder : undefined;
+      },
+      getConfiguration: () => ({ get: () => undefined }),
+      fs: {
+        async stat(uri) {
+          if (uri.fsPath === targetPath) return { type: 1, size: 10 };
+          throw new Error(`not found: ${uri.fsPath}`);
+        },
+      },
+    },
+  };
+
+  const originalLoad = Module._load;
+  try {
+    Module._load = function load(request, parent, isMain) {
+      if (request === 'vscode') return vscodeMock;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[require.resolve(distPath)];
+    const { ScssAliasDocumentLinkProvider } = require(distPath);
+    const doc = {
+      uri: { fsPath: docPath, scheme: 'file', toString: () => `file://${docPath}` },
+      fileName: docPath,
+      getText: () => line,
+      positionAt(offset) {
+        return new Position(0, offset);
+      },
+    };
+    const provider = new ScssAliasDocumentLinkProvider({ appendLine: () => undefined });
+    const links = await provider.provideDocumentLinks(doc, { isCancellationRequested: false });
+    const linkTexts = links.map((link) => line.slice(link.range.start.character, link.range.end.character));
+    check('document link includes full import path target', linkTexts.includes('@scss/_base/__reset'), linkTexts.join(', '));
+    check('document link includes basename segment target', linkTexts.includes('__reset'), linkTexts.join(', '));
+    check('document link basename target is resolved file', links.some((link) => line.slice(link.range.start.character, link.range.end.character) === '__reset' && link.target?.fsPath === targetPath), JSON.stringify(linkTexts));
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
 function check(name, condition, detail) {
   if (condition) pass.push(name);
   else failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
@@ -140,6 +226,7 @@ function check(name, condition, detail) {
 
 verifyAliasResolutionFallback();
 await verifyHardTimeoutScanRecovery();
+await verifyDocumentLinkBasenameTarget();
 
 const pkg = JSON.parse(read('package.json'));
 const constants = read('src/constants.ts');
@@ -202,6 +289,12 @@ check('commands use cancellable progress for full scans', commands.includes('wit
 check('commands pass progress token into class scan', /findClassUsages\([^\n]+\{[^}]*token/s.test(commands));
 check('commands pass progress token into placeholder scan', /findPlaceholderDefinitions\([^\n]+\{[^}]*token/s.test(commands));
 check('commands pass progress token into extend scan', /findExtendReferences\([^\n]+\{[^}]*token/s.test(commands));
+check('commands pass timeout into class scan', /findClassUsages\([^\n]+\{[^}]*timeoutMs: COMMAND_SCAN_TIMEOUT_MS/s.test(commands));
+check('commands pass timeout into placeholder scan', /findPlaceholderDefinitions\([^\n]+\{[^}]*timeoutMs: COMMAND_SCAN_TIMEOUT_MS/s.test(commands));
+check('commands pass timeout into extend scan', /findExtendReferences\([^\n]+\{[^}]*timeoutMs: COMMAND_SCAN_TIMEOUT_MS/s.test(commands));
+
+const documentLinkProvider = read('src/providers/documentLinkProvider.ts');
+check('document links add basename segment target', documentLinkProvider.includes('basenameStartInImport') && documentLinkProvider.includes('pushResolvedLink'));
 
 const sassResolve = read('src/sassResolve.ts');
 check('sass resolver negative cache is short-lived', sassResolve.includes('NEGATIVE_CACHE_TTL_MS'));

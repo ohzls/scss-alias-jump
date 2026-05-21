@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 // Keep in sync with package.json version for debugging.
-export const EXT_VERSION = "0.3.3";
+export const EXT_VERSION = "0.3.4";
 
 export const OUTPUT_CHANNEL_NAME = "SCSS Alias Jump";
 
@@ -25,6 +25,7 @@ export const MAX_SEARCH_RESULTS = 200; // Maximum number of usage references to 
 export const MAX_DEFINITION_RESULTS = 20; // Maximum number of definitions to find
 export const CACHE_TTL_MS = 1500;
 export const SEARCH_TIMEOUT_MS = 1500;
+export const COMMAND_SCAN_TIMEOUT_MS = 10_000;
 export const DEFAULT_SCAN_MAX_FILES = 2000;
 export const DEFAULT_SCAN_MAX_FILE_SIZE_KB = 1024;
 export const DEFAULT_CACHE_AUTO_CLEAR_INTERVAL_MS = 30_000;

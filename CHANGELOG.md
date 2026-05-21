@@ -5,6 +5,15 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-05-21
+
+### Fixed
+- Added basename-segment document links for resolved Sass imports so Cmd/Ctrl-clicking the visible filename segment is less likely to fall through to built-in Sass link providers.
+
+### Improved
+- Added command-level timeouts for manual class usage, placeholder definition, and `@extend` usage scans.
+- Added stability guards for basename document links and bounded manual command scans.
+
 ## [0.3.3] - 2026-05-20
 
 ### Fixed
