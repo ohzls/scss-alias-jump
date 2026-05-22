@@ -83,3 +83,17 @@ samples/
 data/raw/
 data/interim/
 data/processed/
+
+# ML experiment/data bulk directories
+datasets/
+dataset/
+runs/
+wandb/
+mlruns/
+
+# Additional local bulk/archive directories
+archive/
+downloads/
+datafiles/
+gcp/
+.venv*/
