@@ -5,6 +5,13 @@ Goal: keep the VS Code extension stable and reviewable while preserving release/
 
 ---
 
+## Context budget / duplicate suppression (critical)
+
+- For long or repetitive work, follow `/Users/seongwonseo/Documents/knowledge-hub/10_Common/Codex Context Budget Policy.md`.
+- Do not repeatedly paste the same full file, function body, stack trace, long command output, diff, or runtime snapshot into the session.
+- Create a compact context checkpoint after the same artifact is referenced 3+ times, when a major phase ends, when roughly 30 minutes of same-task work has elapsed, or when the user asks to compress/summarize context.
+- Treat checkpoints as derived working memory only; before implementation decisions or final claims, reopen repo-local source truth or rerun validation.
+
 ## First-read order
 
 1. `/Users/seongwonseo/Documents/projects/scss-alias-jump/README.md`
