@@ -1,0 +1,73 @@
+# CodeGraphContext index boundary
+# Keep the graph focused on source truth candidates; do not index dependencies,
+# generated outputs, local caches, secrets, logs, or bulky runtime artifacts.
+
+# VCS / local editor state
+.git/
+.codegraphcontext/
+.idea/
+.vscode/
+.DS_Store
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.sqlite
+*.sqlite3
+*.db
+
+# Dependency directories
+node_modules/
+vendor/
+.venv/
+venv/
+env/
+__pycache__/
+*.egg-info/
+
+# Python / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.cache/
+.ipynb_checkpoints/
+
+# JavaScript / frontend caches and generated output
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.vite/
+.angular/
+coverage/
+dist/
+dist-public/
+build/
+out/
+public/build/
+storybook-static/
+playwright-report/
+test-results/
+
+# Logs and temporary runtime artifacts
+*.log
+logs/
+tmp/
+temp/
+.tmp/
+
+# Package-manager bulk lockfiles; reopen from Git source when dependency truth is needed.
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+
+# Generated reports / artifacts that should be reopened directly only when needed.
+artifacts/
+reports/
