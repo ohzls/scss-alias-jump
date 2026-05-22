@@ -71,3 +71,15 @@ bun.lockb
 # Generated reports / artifacts that should be reopened directly only when needed.
 artifacts/
 reports/
+
+# ML / data pipeline bulk working directories
+work/
+outputs/
+external/
+checkpoints/
+models/
+weights/
+samples/
+data/raw/
+data/interim/
+data/processed/
