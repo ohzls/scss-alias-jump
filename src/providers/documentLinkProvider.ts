@@ -6,6 +6,7 @@ import { getDocFsPath } from "../docPath";
 import { ensureNoExt, resolveSassPathCached } from "../sassResolve";
 import { resolveAliasToAbsolute } from "../aliasResolve";
 import { debug as dbg } from "../output";
+import { firstNonCommentIdx } from "../textScan";
 
 export class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvider {
   constructor(private out: vscode.OutputChannel) {}
@@ -90,6 +91,12 @@ export class ScssAliasDocumentLinkProvider implements vscode.DocumentLinkProvide
       const importPath = m[3];
       if (!importPath) continue;
       if (importPath.startsWith("sass:")) continue;
+
+      const lineStart = text.lastIndexOf("\n", m.index) + 1;
+      const lineEnd = text.indexOf("\n", m.index);
+      const lineText = text.slice(lineStart, lineEnd >= 0 ? lineEnd : text.length);
+      const matchStartOnLine = m.index - lineStart;
+      if (matchStartOnLine >= firstNonCommentIdx(lineText)) continue;
 
       const q = m[2];
       const qRel1 = full.indexOf(q);

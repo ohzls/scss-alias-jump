@@ -52,16 +52,47 @@ function lineHasClassUsageSignal(line: string, cssModuleImportVars: readonly str
     line.includes("clsx(") ||
     line.includes("classnames(") ||
     line.includes("styles.") ||      // CSS Modules (React/Vue)
+    line.includes("styles[") ||      // CSS Modules bracket access
     line.includes("$style.") ||       // CSS Modules (Vue)
-    cssModuleImportVars.some((importVar) => line.includes(`${importVar}.`))
+    line.includes("$style[") ||       // CSS Modules bracket access (Vue)
+    cssModuleImportVars.some((importVar) => line.includes(`${importVar}.`) || line.includes(`${importVar}[`))
   );
 }
 
-function buildCssModuleUsagePatterns(importVars: readonly string[], tokenText: string): RegExp[] {
-  const patterns = importVars.map(
-    (importVar) => new RegExp(`\\b${escapeRegExp(importVar)}\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g")
+type CssModuleUsagePattern = {
+  re: RegExp;
+  classStart: (match: RegExpExecArray) => number;
+};
+
+function classNameStart(match: RegExpExecArray, tokenText: string): number {
+  return match.index + match[0].lastIndexOf(tokenText);
+}
+
+function buildCssModuleUsagePatterns(importVars: readonly string[], tokenText: string): CssModuleUsagePattern[] {
+  const token = escapeRegExp(tokenText);
+  const patterns = importVars.flatMap((importVar) => {
+    const ns = escapeRegExp(importVar);
+    return [
+      {
+        re: new RegExp(`\\b${ns}\\.${token}(?![A-Za-z0-9_])`, "g"),
+        classStart: (match: RegExpExecArray) => classNameStart(match, tokenText),
+      },
+      {
+        re: new RegExp(`\\b${ns}\\s*\\[\\s*(['"])${token}\\1\\s*\\]`, "g"),
+        classStart: (match: RegExpExecArray) => classNameStart(match, tokenText),
+      },
+    ];
+  });
+  patterns.push(
+    {
+      re: new RegExp(`\\$style\\.${token}(?![A-Za-z0-9_])`, "g"),
+      classStart: (match: RegExpExecArray) => classNameStart(match, tokenText),
+    },
+    {
+      re: new RegExp(`\\$style\\s*\\[\\s*(['"])${token}\\1\\s*\\]`, "g"),
+      classStart: (match: RegExpExecArray) => classNameStart(match, tokenText),
+    }
   );
-  patterns.push(new RegExp(`\\$style\\.${escapeRegExp(tokenText)}(?![A-Za-z0-9_])`, "g"));
   return patterns;
 }
 
@@ -101,14 +132,13 @@ export async function findClassUsages(
         const cssModulesPatterns = buildCssModuleUsagePatterns(cssModuleImportVars, tokenText);
 
         let foundCssModules = false;
-        for (const pattern of cssModulesPatterns) {
-          pattern.lastIndex = 0;
+        for (const usagePattern of cssModulesPatterns) {
+          usagePattern.re.lastIndex = 0;
           let match: RegExpExecArray | null;
-          while ((match = pattern.exec(line))) {
-            const dotIdx = match.index + match[0].indexOf(".");
+          while ((match = usagePattern.re.exec(line))) {
             refs.push({
               uri: file,
-              pos: new vscode.Position(i, dotIdx + 1), // +1 to skip the dot
+              pos: new vscode.Position(i, usagePattern.classStart(match)),
               hint: fileHintFromPath(file),
             });
             foundCssModules = true;

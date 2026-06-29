@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { USE_FORWARD_IMPORT_RE } from "./constants";
 import { ensureNoExt } from "./sassResolve";
 import { splitLines } from "./strings";
+import { firstNonCommentIdx } from "./textScan";
 
 export function getPlaceholderNameUnderCursor(
   document: vscode.TextDocument,
@@ -58,20 +59,21 @@ export function getCssModuleClassUnderCursor(
   const allowed = allowedImportVars ? new Set(allowedImportVars) : null;
   
   // Match any imported CSS Module namespace (`styles.foo`, `layout.foo`,
-  // `appLayout.foo`) and Vue's built-in `$style.foo` namespace. Whether the
-  // namespace is actually a CSS Module import is validated by the provider
-  // before this helper is called.
+  // `appLayout.foo`, `styles["foo-bar"]`) and Vue's built-in `$style.foo`
+  // namespace. Whether the namespace is actually a CSS Module import is
+  // validated by the provider before this helper is called.
   const patterns = [
-    /(^|[^A-Za-z0-9_$.])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z0-9_-]+)/g,
+    { re: /(^|[^A-Za-z0-9_$.])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z0-9_-]+)/g, classNameGroup: 3 },
+    { re: /(^|[^A-Za-z0-9_$.])([A-Za-z_$][\w$]*)\s*\[\s*(['"])([A-Za-z0-9_-]+)\3\s*\]/g, classNameGroup: 4 },
   ];
   
-  for (const pattern of patterns) {
+  for (const { re: pattern, classNameGroup } of patterns) {
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     
     while ((match = pattern.exec(lineText))) {
       const importVar = match[2];
-      const className = match[3];
+      const className = match[classNameGroup];
       const matchStart = match.index + match[1].length;
       const matchEnd = match.index + match[0].length;
       if (allowed && !allowed.has(importVar)) continue;
@@ -107,9 +109,13 @@ export function getImportPathUnderCursorOnLine(
   line: string,
   positionCh: number
 ): { importPath: string; startIdx: number; endIdx: number } | null {
+  const commentIdx = firstNonCommentIdx(line);
+  if (positionCh >= commentIdx) return null;
+
+  const searchableLine = line.slice(0, commentIdx);
   USE_FORWARD_IMPORT_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = USE_FORWARD_IMPORT_RE.exec(line))) {
+  while ((match = USE_FORWARD_IMPORT_RE.exec(searchableLine))) {
     const full = match[0];
     const importPath = match[3];
     const q = match[2];
@@ -169,53 +175,114 @@ export function getCssClassUnderCursor(
 
 /**
  * Extract class name from template class attribute (Vue/Svelte)
- * Supports: class="foo", className="foo", :class="foo", v-bind:class="foo", class:foo
- * Also supports: class={foo} (Svelte), class={"foo"} (Svelte)
+ * Supports: class="foo", className="foo", class={"foo"} (Svelte),
+ * Vue bound class literal expressions, and class:foo (Svelte).
  */
 export function getClassNameUnderCursor(line: string, character: number): string | null {
-  // Patterns for class attributes
-  const patterns = [
-    /(?:class|className)\s*=\s*["']([^"']+)["']/g,        // class="foo"
-    /(?:class|className)\s*=\s*\{["']([^"']+)["']\}/g,    // class={"foo"} (Svelte)
-    /:class\s*=\s*["']([^"']+)["']/g,                     // :class="foo" (Vue)
-    /v-bind:class\s*=\s*["']([^"']+)["']/g,               // v-bind:class="foo" (Vue)
-    /class:([A-Za-z0-9_-]+)/g,                            // class:foo (Svelte)
+  // Dynamic bindings must run before static attributes. Otherwise the static
+  // `class="..."` matcher can see the `class` substring inside `:class="..."`.
+  const boundClassAttr = /(?::class|v-bind:class)\s*=\s*(["'])(.*?)\1/g;
+  let boundMatch: RegExpExecArray | null;
+  while ((boundMatch = boundClassAttr.exec(line))) {
+    const expression = boundMatch[2];
+    const expressionStart = boundMatch.index + boundMatch[0].indexOf(expression);
+    const expressionEnd = expressionStart + expression.length;
+    if (character < expressionStart || character > expressionEnd) continue;
+
+    const literalClass = classFromBoundClassExpression(expression, expressionStart, character);
+    if (literalClass) return literalClass;
+  }
+
+  const staticPatterns = [
+    /(^|[\s<{])(?:class|className)\s*=\s*(["'])([^"']*)\2/g,          // class="foo"
+    /(^|[\s<{])(?:class|className)\s*=\s*\{\s*(["'])([^"']*)\2\s*\}/g, // class={"foo"} (Svelte)
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of staticPatterns) {
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
-    
     while ((match = pattern.exec(line))) {
-      const fullMatch = match[0];
-      const classValue = match[1];
-      const matchStart = match.index;
-      const matchEnd = matchStart + fullMatch.length;
-
-      // Check if cursor is within this match
-      if (character >= matchStart && character <= matchEnd) {
-        // If the class value contains multiple classes, find which one is under cursor
-        if (classValue.includes(" ")) {
-          const classes = classValue.split(/\s+/);
-          const valueStart = matchStart + fullMatch.indexOf(classValue);
-          
-          let offset = valueStart;
-          for (const cls of classes) {
-            const clsStart = offset;
-            const clsEnd = offset + cls.length;
-            
-            if (character >= clsStart && character <= clsEnd && cls.trim()) {
-              return cls.trim();
-            }
-            
-            offset = clsEnd + 1; // +1 for space
-          }
-        } else if (classValue.trim()) {
-          return classValue.trim();
-        }
-      }
+      const classValue = match[3];
+      const valueStart = match.index + match[0].indexOf(classValue);
+      const className = classFromSpaceSeparatedValue(classValue, valueStart, character);
+      if (className) return className;
     }
   }
 
+  const svelteDirective = /(^|[\s<{])class:([A-Za-z0-9_-]+)/g;
+  let directiveMatch: RegExpExecArray | null;
+  while ((directiveMatch = svelteDirective.exec(line))) {
+    const classValue = directiveMatch[2];
+    const classStart = directiveMatch.index + directiveMatch[0].indexOf(classValue);
+    const classEnd = classStart + classValue.length;
+    if (character >= classStart && character <= classEnd) return classValue;
+  }
+
   return null;
+}
+
+function classFromSpaceSeparatedValue(value: string, valueStart: number, character: number): string | null {
+  const classToken = /\S+/g;
+  let tokenMatch: RegExpExecArray | null;
+  while ((tokenMatch = classToken.exec(value))) {
+    const className = tokenMatch[0].trim();
+    if (!className) continue;
+    const classStart = valueStart + tokenMatch.index;
+    const classEnd = classStart + className.length;
+    if (character >= classStart && character <= classEnd) return className;
+  }
+  return null;
+}
+
+function classFromBoundClassExpression(expression: string, expressionStart: number, character: number): string | null {
+  const bareObjectKey = /(^|[{\[,]\s*)([A-Za-z_$][\w$-]*)\s*:/g;
+  let bareKeyMatch: RegExpExecArray | null;
+  while ((bareKeyMatch = bareObjectKey.exec(expression))) {
+    const className = bareKeyMatch[2];
+    const classStart = expressionStart + bareKeyMatch.index + bareKeyMatch[0].indexOf(className);
+    const classEnd = classStart + className.length;
+    if (character >= classStart && character <= classEnd) return className;
+  }
+
+  const stringLiteral = /(['"])([^'"]*)\1/g;
+  let stringMatch: RegExpExecArray | null;
+  while ((stringMatch = stringLiteral.exec(expression))) {
+    const afterLiteral = expression.slice(stringMatch.index + stringMatch[0].length);
+    if (/^\s*:/.test(afterLiteral)) {
+      const quotedKey = classFromSpaceSeparatedValue(
+        stringMatch[2],
+        expressionStart + stringMatch.index + 1,
+        character
+      );
+      if (quotedKey) return quotedKey;
+      continue;
+    }
+    if (isLikelyNonClassStringLiteral(expression, stringMatch.index)) continue;
+
+    const literalClass = classFromSpaceSeparatedValue(
+      stringMatch[2],
+      expressionStart + stringMatch.index + 1,
+      character
+    );
+    if (literalClass) return literalClass;
+  }
+
+  return null;
+}
+
+function isLikelyNonClassStringLiteral(expression: string, literalStart: number): boolean {
+  const beforeLiteral = expression.slice(0, literalStart);
+  const previousNonSpace = beforeLiteral.trimEnd().slice(-1);
+  if (previousNonSpace && /[=<>!]/.test(previousNonSpace)) return true;
+
+  const lastObjectSegmentStart = Math.max(
+    beforeLiteral.lastIndexOf("{"),
+    beforeLiteral.lastIndexOf(",")
+  ) + 1;
+  const segment = beforeLiteral.slice(lastObjectSegmentStart);
+  const firstColon = segment.indexOf(":");
+  if (firstColon < 0) return false;
+
+  const firstQuestion = segment.indexOf("?");
+  return firstQuestion < 0 || firstColon < firstQuestion;
 }

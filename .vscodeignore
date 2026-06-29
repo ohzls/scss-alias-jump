@@ -15,3 +15,5 @@ AGENTS.md
 
 .env
 .env.*
+
+tests/**

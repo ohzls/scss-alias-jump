@@ -5,6 +5,22 @@ All notable changes to the "SCSS Alias Jump" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Release metadata automation now keeps `package.json`, `package-lock.json`, `src/constants.ts`, and `CHANGELOG.md` aligned.
+- Moved `@vscode/vsce` to development-only tooling and pinned `@types/vscode` to the declared minimum VS Code API version.
+- Ignored Sass `@use`/`@forward`/`@import` paths that appear inside line comments.
+- Added CSS Modules bracket access parsing for class names such as `styles["file-item"]`.
+- Improved Vue bound class parsing so object/array literal class names are clickable while computed variables and condition-only strings are ignored.
+
+### Added
+- Added CI coverage for compile, parser contract tests, stability contract verification, and the production audit surface.
+- Added Node.js parser contract tests for Sass imports, CSS Modules namespace parsing, SCSS interpolation inference, and template class parsing.
+
+### Improved
+- Cleaned stale README version-history language and documented the release metadata workflow.
+
 ## [0.3.5] - 2026-05-21
 
 ### Fixed

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -306,6 +308,126 @@ async function verifyCssModuleNamespaceResolution() {
   }
 }
 
+function verifyPackageMetadataPolicy() {
+  const pkg = JSON.parse(read('package.json'));
+  const lock = JSON.parse(read('package-lock.json'));
+  const deps = pkg.dependencies ?? {};
+  const devDeps = pkg.devDependencies ?? {};
+  const lockRoot = lock.packages?.[''] ?? {};
+
+  check(
+    '@vscode/vsce is development-only tooling',
+    !Object.prototype.hasOwnProperty.call(deps, '@vscode/vsce') &&
+      Object.prototype.hasOwnProperty.call(devDeps, '@vscode/vsce'),
+    JSON.stringify({ dependencies: deps, devDependencies: devDeps })
+  );
+  check(
+    'package-lock keeps @vscode/vsce development-only',
+    !Object.prototype.hasOwnProperty.call(lockRoot.dependencies ?? {}, '@vscode/vsce') &&
+      Object.prototype.hasOwnProperty.call(lockRoot.devDependencies ?? {}, '@vscode/vsce'),
+    JSON.stringify(lockRoot)
+  );
+
+  const engineMatch = /^\^(\d+\.\d+\.\d+)$/.exec(pkg.engines?.vscode ?? '');
+  const minimumVscodeApi = engineMatch?.[1] ?? null;
+  check('engines.vscode uses an explicit minimum API version', Boolean(minimumVscodeApi), pkg.engines?.vscode);
+  if (minimumVscodeApi) {
+    check(
+      '@types/vscode is pinned to the declared minimum VS Code API',
+      devDeps['@types/vscode'] === minimumVscodeApi,
+      devDeps['@types/vscode'] ?? 'missing'
+    );
+    check(
+      'package-lock @types/vscode matches the declared minimum VS Code API',
+      lock.packages?.['node_modules/@types/vscode']?.version === minimumVscodeApi,
+      lock.packages?.['node_modules/@types/vscode']?.version ?? 'missing'
+    );
+  }
+
+  const scripts = pkg.scripts ?? {};
+  check('package exposes parser contract test script', scripts['test:parser'] === 'node --test tests/*.test.mjs');
+  check(
+    'package default test runs compile and parser contracts',
+    typeof scripts.test === 'string' &&
+      scripts.test.includes('npm run compile') &&
+      scripts.test.includes('npm run test:parser'),
+    scripts.test ?? 'missing'
+  );
+}
+
+function verifyReleaseScriptMaintainsReleaseMetadata() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'scss-alias-jump-release-'));
+  const rels = [
+    'package.json',
+    'package-lock.json',
+    'README.md',
+    'CHANGELOG.md',
+    path.join('src', 'constants.ts'),
+    path.join('scripts', 'release.mjs'),
+  ];
+
+  try {
+    for (const rel of rels) {
+      const src = path.join(root, rel);
+      const dest = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest);
+    }
+
+    const nextVersion = '9.9.9';
+    const result = spawnSync(process.execPath, ['scripts/release.mjs', 'set', nextVersion], {
+      cwd: tmp,
+      encoding: 'utf8',
+    });
+    check(
+      'release script set command succeeds in an isolated temp repo',
+      result.status === 0,
+      `${result.stdout}${result.stderr}`
+    );
+    if (result.status !== 0) return;
+
+    const tmpRead = (rel) => fs.readFileSync(path.join(tmp, rel), 'utf8');
+    const pkg = JSON.parse(tmpRead('package.json'));
+    const lock = JSON.parse(tmpRead('package-lock.json'));
+    const constants = tmpRead(path.join('src', 'constants.ts'));
+    const changelog = tmpRead('CHANGELOG.md');
+
+    check('release script updates package.json version', pkg.version === nextVersion, pkg.version);
+    check('release script updates package-lock top-level version', lock.version === nextVersion, lock.version);
+    check(
+      'release script updates package-lock root package version',
+      lock.packages?.['']?.version === nextVersion,
+      lock.packages?.['']?.version
+    );
+    check(
+      'release script updates EXT_VERSION',
+      new RegExp(`EXT_VERSION\\s*=\\s*"${nextVersion.replaceAll('.', '\\.')}"`).test(constants),
+      constants.match(/EXT_VERSION\s*=\s*"([^"]+)"/)?.[1] ?? 'missing'
+    );
+    check(
+      'release script adds dated CHANGELOG section',
+      new RegExp(`^## \\[${nextVersion.replaceAll('.', '\\.')}\\] - \\d{4}-\\d{2}-\\d{2}`, 'm').test(changelog),
+      'missing dated changelog header'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function verifyCiWorkflowGuardsRepresentativeChecks() {
+  const rel = path.join('.github', 'workflows', 'ci.yml');
+  const full = path.join(root, rel);
+  check('CI workflow exists for ordinary pushes/PRs', fs.existsSync(full), rel);
+  if (!fs.existsSync(full)) return;
+
+  const text = fs.readFileSync(full, 'utf8');
+  check('CI workflow installs from lockfile', text.includes('npm ci'));
+  check('CI workflow runs compile', text.includes('npm run compile'));
+  check('CI workflow runs parser contract tests', text.includes('npm run test:parser'));
+  check('CI workflow runs stability guard', text.includes('npm run verify:stability'));
+  check('CI workflow checks production audit surface', text.includes('npm audit --omit=dev'));
+}
+
 function check(name, condition, detail) {
   if (condition) pass.push(name);
   else failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
@@ -315,6 +437,9 @@ verifyAliasResolutionFallback();
 await verifyHardTimeoutScanRecovery();
 await verifyDocumentLinkBasenameTarget();
 await verifyCssModuleNamespaceResolution();
+verifyPackageMetadataPolicy();
+verifyReleaseScriptMaintainsReleaseMetadata();
+verifyCiWorkflowGuardsRepresentativeChecks();
 
 const pkg = JSON.parse(read('package.json'));
 const constants = read('src/constants.ts');
@@ -383,6 +508,9 @@ check('commands pass timeout into extend scan', /findExtendReferences\([^\n]+\{[
 
 const documentLinkProvider = read('src/providers/documentLinkProvider.ts');
 check('document links add basename segment target', documentLinkProvider.includes('basenameStartInImport') && documentLinkProvider.includes('pushResolvedLink'));
+
+const vscodeIgnore = read('.vscodeignore');
+check('VSIX excludes parser test sources', /^tests\/\*\*$/m.test(vscodeIgnore));
 
 const cursorTokens = read('src/cursorTokens.ts');
 check('CSS Module cursor parser is namespace-generic and import-var gated', cursorTokens.includes('layout.className') && cursorTokens.includes('allowedImportVars'));

@@ -8,7 +8,7 @@ VS Code extension that enables Cmd/Ctrl+Click (Go to Definition) for SCSS/Sass `
 
 - **`@use`/`@forward`/`@import` path jump**: Cmd/Ctrl+Click on import paths with alias prefixes
 - **`@extend %placeholder` jump**: Jump to placeholder definitions, including nested structures
-- **Bidirectional CSS Modules jump (NEW)**:
+- **Bidirectional CSS Modules jump**:
   - React/TypeScript → SCSS: `styles.fileItem` / `layout.pageInner` → `.fileItem` / `.pageInner` definition
   - SCSS → React/TypeScript: `.fileItem` → `styles.fileItem` / `layout.fileItem` usages
 - **Template class jump**: Cmd/Ctrl+Click on class names in Vue/Svelte templates to jump to SCSS definitions
@@ -98,7 +98,7 @@ Given an absolute base path (after alias/relative expansion) it tries common Sas
 
 ### CSS Modules (React/TypeScript/Vue)
 
-**NEW in 0.1.17**: Bidirectional jump between TypeScript and SCSS!
+Bidirectional jump between TypeScript and SCSS:
 
 **TypeScript → SCSS:**
 ```tsx
@@ -166,6 +166,8 @@ Will find definitions in:
 Supports:
 - `class="..."`, `className="..."`
 - `:class="..."`, `v-bind:class="..."`
+  - Literal class keys in Vue object/array bindings, such as `:class="{ active: ok, 'is-open': open }"` and `:class="['foo', cond && 'bar']"`
+  - Computed variable-only bindings such as `:class="computedClass"` and condition-only strings such as `state === 'enabled'` are ignored because no literal CSS class can be resolved from that token
 - `class:foo` (Svelte)
 - Multiple classes: `class="foo bar baz"` (click on specific class)
 
@@ -193,6 +195,25 @@ node ./scripts/bundle.mjs --install-cursor --cursor-bin /path/to/cursor
 ```
 
 
+### Prepare release metadata
+
+Use the release script to keep package metadata, lockfile metadata, runtime debug version, and changelog headers in sync:
+
+```bash
+npm run release:patch
+# or: npm run release:minor / npm run release:major / npm run release:set -- <version>
+```
+
+The script updates `package.json`, `package-lock.json`, `src/constants.ts`, and adds a dated `CHANGELOG.md` section when needed. Replace the generated changelog note with release-specific details before publishing, then run:
+
+```bash
+npm run compile
+npm test
+npm run verify:stability
+npm run publish:marketplace:dry
+```
+
+
 ### Publish to VS Code Marketplace
 
 Prerequisites:
@@ -217,6 +238,7 @@ The publish script validates `package.json`/`package-lock.json` version parity, 
 
 GitHub Actions:
 
+- `CI` runs on pushes to `main` and pull requests, covering `npm ci`, `compile`, parser contract tests, `verify:stability`, and `npm audit --omit=dev`.
 - `Publish VS Code Extension` can be run manually with `dry_run=true` for validation only.
 - Pushing a `v*` tag publishes with `--skip-duplicate` using the `VSCE_PAT` secret.
 
@@ -242,28 +264,3 @@ GitHub Actions:
 ---
 
 **For complete version history, see [CHANGELOG.md](./CHANGELOG.md)**
-
-### History
-
-- **0.3.5**
-  - Fixed CSS Module jumps for arbitrary imported namespaces such as `layout.pageInner`, including alias imports like `@/AppLayout.module.scss`.
-
-- **0.3.4**
-  - Added basename-segment import links and bounded manual command scans to close red-team follow-ups.
-
-- **0.3.3**
-  - Added cache self-healing: hard scan timeout, periodic auto-clear, and a manual clear-caches command.
-
-- **0.3.2**
-  - Fixed `@scss/...` Sass links for vendored shared SCSS roots such as `vendor/_assets/scss`.
-
-- **0.3.1**
-  - Stabilized large-workspace scans, fixed `@/` Sass link fallback, and added verified Cursor VSIX bundling.
-
-
-- **0.2.0**
-  - (fill)
-
-
-- **0.3.0**
-  - (fill)
