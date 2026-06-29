@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-29
+
 ### Fixed
 - Release metadata automation now keeps `package.json`, `package-lock.json`, `src/constants.ts`, and `CHANGELOG.md` aligned.
 - Moved `@vscode/vsce` to development-only tooling and pinned `@types/vscode` to the declared minimum VS Code API version.
